@@ -30,15 +30,18 @@ const WORLD_HEIGHT = 5200;
 const ARENA = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, radius: 1120 };
 const PLAYER_RADIUS = 46;
 const PLAYER_SPEED = 150;
-const BOOST_MULTIPLIER = 1.2;
-const BOOST_BURST_MS = 450;
+const BOOST_MULTIPLIER = 2.3;
+const BOOST_BURST_MS = 140;
 const BOOST_COOLDOWN_MS = 3000;
+const BOOST_IMPULSE = 240;
+const BOOST_WATER_COST = 14;
 const POSITION_LERP_SECONDS = 0.175;
-const MOVEMENT_RAMP_SECONDS = 0.42;
-const NORMAL_ACCEL = 10;
-const BOOST_ACCEL = 12;
-const NORMAL_DRAG = 10;
-const BOOST_DRAG = 8;
+const POINTER_FORCE_RADIUS = 240;
+const NORMAL_FORCE = 560;
+const BOOST_FORCE = 860;
+const NORMAL_FRICTION = 2.25;
+const BOOST_FRICTION = 1.2;
+const TURN_SPEED = 5.5;
 const WATER_REGEN_PER_SECOND = 8;
 const WATER_BOOST_DRAIN_PER_SECOND = 16;
 const BITE_RANGE = 122;
@@ -236,14 +239,36 @@ function hydratePlayerName() {
 function canTriggerBoost(dragon, now = performance.now()) {
   return Boolean(
     dragon &&
-    dragon.water > 0.5 &&
+    dragon.water >= BOOST_WATER_COST &&
     now >= dragon.boostCooldownUntil
   );
 }
 
-function activateBoostBurst(dragon, now = performance.now()) {
+function directionTowardTarget(fromX, fromY, toX, toY, fallbackAngle = 0) {
+  const direction = normalize(toX - fromX, toY - fromY);
+  if (direction.length > 0.001) {
+    return direction;
+  }
+
+  return {
+    x: Math.cos(fallbackAngle),
+    y: Math.sin(fallbackAngle),
+    length: 1
+  };
+}
+
+function activateBoostBurst(dragon, direction, now = performance.now()) {
   dragon.boostActiveUntil = now + BOOST_BURST_MS;
   dragon.boostCooldownUntil = now + BOOST_COOLDOWN_MS;
+  dragon.x += direction.x * 26;
+  dragon.y += direction.y * 26;
+  dragon.ox = dragon.x;
+  dragon.oy = dragon.y;
+  dragon.nx = dragon.x;
+  dragon.ny = dragon.y;
+  dragon.vx += direction.x * BOOST_IMPULSE;
+  dragon.vy += direction.y * BOOST_IMPULSE;
+  dragon.water = Math.max(0, dragon.water - BOOST_WATER_COST);
   dragon.boosting = true;
   dragon.boostVisual = Math.max(dragon.boostVisual, 0.72);
 }
@@ -638,31 +663,33 @@ function updateLocalDragon(dt) {
   const now = performance.now();
   const wantsBoost = now < dragon.boostActiveUntil && dragon.water > 0.5;
   const maxSpeed = dragon.baseSpeed * (wantsBoost ? BOOST_MULTIPLIER : 1);
-  const targetSpeed = Math.min(maxSpeed, distance / MOVEMENT_RAMP_SECONDS);
-  const accel = wantsBoost ? BOOST_ACCEL : NORMAL_ACCEL;
-  const drag = wantsBoost ? BOOST_DRAG : NORMAL_DRAG;
-  const easing = 1 - Math.exp(-accel * dt);
+  const thrustScale = Math.pow(clamp(distance / POINTER_FORCE_RADIUS, 0, 1), 2);
+  const force = (wantsBoost ? BOOST_FORCE : NORMAL_FORCE) * thrustScale;
+  const friction = wantsBoost ? BOOST_FRICTION : NORMAL_FRICTION;
 
-  dragon.vx += (direction.x * targetSpeed - dragon.vx) * easing;
-  dragon.vy += (direction.y * targetSpeed - dragon.vy) * easing;
-
-  if (distance < 0.001) {
-    dragon.vx *= Math.exp(-drag * dt);
-    dragon.vy *= Math.exp(-drag * dt);
+  if (distance > 0.001) {
+    dragon.vx += direction.x * force * dt;
+    dragon.vy += direction.y * force * dt;
   }
 
-  const maxStep = maxSpeed * dt;
-  const proposedStep = Math.hypot(dragon.vx * dt, dragon.vy * dt);
-  const stepScale = proposedStep > maxStep && proposedStep > 0 ? maxStep / proposedStep : 1;
+  dragon.vx *= Math.exp(-friction * dt);
+  dragon.vy *= Math.exp(-friction * dt);
 
-  dragon.x += dragon.vx * dt * stepScale;
-  dragon.y += dragon.vy * dt * stepScale;
+  const speed = Math.hypot(dragon.vx, dragon.vy);
+  if (speed > maxSpeed && speed > 0) {
+    const scale = maxSpeed / speed;
+    dragon.vx *= scale;
+    dragon.vy *= scale;
+  }
+
+  dragon.x += dragon.vx * dt;
+  dragon.y += dragon.vy * dt;
   dragon.vx = (dragon.x - previousX) / Math.max(dt, 0.0001);
   dragon.vy = (dragon.y - previousY) / Math.max(dt, 0.0001);
 
-  const movement = Math.hypot(dragon.vx, dragon.vy);
-  if (movement > 5) {
-    dragon.angle = Math.atan2(dragon.vy, dragon.vx);
+  if (distance > 0.001) {
+    const targetAngle = Math.atan2(direction.y, direction.x);
+    dragon.angle += shortestAngleDelta(dragon.angle, targetAngle) * Math.min(TURN_SPEED * dt, 1);
   }
 
   if (wantsBoost && distance > 0.001) {
@@ -673,7 +700,7 @@ function updateLocalDragon(dt) {
   if (!wantsBoost) {
     dragon.boostActiveUntil = 0;
   }
-  dragon.boosting = wantsBoost && distance > 0.001;
+  dragon.boosting = wantsBoost && speed > 10;
   dragon.boostVisual = approach(dragon.boostVisual, dragon.boosting ? 1 : 0, 10, dt);
   syncDragonStatusBars(dragon);
 
@@ -1113,9 +1140,18 @@ function setBoost(active) {
     return;
   }
 
-  state.input.boost = true;
+  const targetX = state.pointer.hasPointer
+    ? state.pointer.worldX
+    : dragon.x + Math.cos(dragon.angle) * 120;
+  const targetY = state.pointer.hasPointer
+    ? state.pointer.worldY
+    : dragon.y + Math.sin(dragon.angle) * 120;
+  const direction = directionTowardTarget(dragon.x, dragon.y, targetX, targetY, dragon.angle);
+
+  state.input.boost = false;
   if (dragon) {
-    activateBoostBurst(dragon, now);
+    activateBoostBurst(dragon, direction, now);
+    clampToArena(dragon);
   }
   sendBooleanPacket(PACKET_BOOST, true);
 }
