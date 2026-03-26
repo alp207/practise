@@ -54,6 +54,10 @@ const BITE_RANGE = 122;
 const BITE_DAMAGE = 10;
 const BITE_COOLDOWN_MS = 2500;
 const BITE_COOLDOWN_SECONDS = BITE_COOLDOWN_MS / 1000;
+const MOUTH_HITBOX_OFFSET = 1.16;
+const MOUTH_HITBOX_HALF_LENGTH = 0.2;
+const TAIL_HITBOX_OFFSET = 1.08;
+const TAIL_HITBOX_HALF_LENGTH = 0.28;
 const HEALTH_BAR_TIMEOUT_MS = 1800;
 const BITE_BAR_TIMEOUT_MS = 500;
 const PING_INTERVAL_MS = 2000;
@@ -1075,57 +1079,50 @@ function drawDragonBars(dragon) {
   }
 }
 
-function drawTailHitbox(dragon) {
+function segmentFromCenter(centerX, centerY, angle, halfLength) {
+  const dx = Math.cos(angle) * halfLength;
+  const dy = Math.sin(angle) * halfLength;
+  return {
+    x1: centerX - dx,
+    y1: centerY - dy,
+    x2: centerX + dx,
+    y2: centerY + dy
+  };
+}
+
+function mouthHitboxSegmentForDragon(dragon) {
+  const centerX = dragon.x + Math.cos(dragon.angle) * dragon.radius * MOUTH_HITBOX_OFFSET;
+  const centerY = dragon.y + Math.sin(dragon.angle) * dragon.radius * MOUTH_HITBOX_OFFSET;
+  return segmentFromCenter(centerX, centerY, dragon.angle + Math.PI / 2, dragon.radius * MOUTH_HITBOX_HALF_LENGTH);
+}
+
+function tailHitboxSegmentForDragon(dragon) {
+  const centerX = dragon.x - Math.cos(dragon.angle) * dragon.radius * TAIL_HITBOX_OFFSET;
+  const centerY = dragon.y - Math.sin(dragon.angle) * dragon.radius * TAIL_HITBOX_OFFSET;
+  return segmentFromCenter(centerX, centerY, dragon.angle + Math.PI / 2, dragon.radius * TAIL_HITBOX_HALF_LENGTH);
+}
+
+function drawHitboxSegment(segment, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 6;
+  ctx.lineCap = "round";
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.moveTo(segment.x1, segment.y1);
+  ctx.lineTo(segment.x2, segment.y2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawDebugHitboxes(dragon) {
   if (!dragon) {
     return;
   }
 
-  const hasSegment = [
-    dragon.tailHitboxX1,
-    dragon.tailHitboxY1,
-    dragon.tailHitboxX2,
-    dragon.tailHitboxY2
-  ].every(Number.isFinite);
-
-  let x1;
-  let y1;
-  let x2;
-  let y2;
-
-  if (hasSegment) {
-    x1 = dragon.tailHitboxX1;
-    y1 = dragon.tailHitboxY1;
-    x2 = dragon.tailHitboxX2;
-    y2 = dragon.tailHitboxY2;
-  } else {
-    const tailX = Number.isFinite(dragon.tailX)
-      ? dragon.tailX
-      : dragon.x - Math.cos(dragon.angle) * dragon.radius * 1.08;
-    const tailY = Number.isFinite(dragon.tailY)
-      ? dragon.tailY
-      : dragon.y - Math.sin(dragon.angle) * dragon.radius * 1.08;
-    const perpendicularAngle = dragon.angle + Math.PI / 2;
-    const halfLength = dragon.radius * 0.28;
-    const dx = Math.cos(perpendicularAngle) * halfLength;
-    const dy = Math.sin(perpendicularAngle) * halfLength;
-
-    x1 = tailX - dx;
-    y1 = tailY - dy;
-    x2 = tailX + dx;
-    y2 = tailY + dy;
-  }
-
-  ctx.save();
-  ctx.strokeStyle = "rgba(210, 64, 255, 0.92)";
-  ctx.lineWidth = 6;
-  ctx.lineCap = "round";
-  ctx.shadowColor = "rgba(210, 64, 255, 0.35)";
-  ctx.shadowBlur = 8;
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.stroke();
-  ctx.restore();
+  drawHitboxSegment(mouthHitboxSegmentForDragon(dragon), "rgba(255, 165, 64, 0.92)");
+  drawHitboxSegment(tailHitboxSegmentForDragon(dragon), "rgba(210, 64, 255, 0.92)");
 }
 
 function drawDragon(dragon, glowColor, bodyAlpha = 1) {
@@ -1153,7 +1150,7 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   }
 
   ctx.restore();
-  drawTailHitbox(dragon);
+  drawDebugHitboxes(dragon);
   drawDragonBars(dragon);
 }
 

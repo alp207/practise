@@ -41,16 +41,18 @@ const PACKET_RESIZE = 0x11;
 const PACKET_SECONDARY = 0x14;
 const PACKET_BOOST = 0x15;
 const PACKET_INVITE_1V1 = 0x34;
-const BITE_CONTACT_RANGE = 16;
+const BITE_CONTACT_RANGE = 6;
 const BITE_DAMAGE = 10;
 const BITE_COOLDOWN = 2.5;
+const MOUTH_HITBOX_OFFSET = 1.16;
+const MOUTH_HITBOX_HALF_LENGTH = 0.2;
 const TAIL_HITBOX_OFFSET = 1.08;
 const TAIL_HITBOX_HALF_LENGTH = 0.28;
 const ROOM_MIN_ARENA_RADIUS = 180;
 const ROOM_SHRINK_DELAY_MS = 8000;
 const ROOM_SHRINK_PER_SECOND = 2.2;
 const ARENA_BURN_DAMAGE_PER_SECOND = 3;
-const BITE_MAX_ANGLE_ERROR = 0.35;
+const BITE_MAX_ANGLE_ERROR = 0.22;
 
 const clients = new Map();
 const rooms = new Map();
@@ -583,8 +585,24 @@ function updateDragon(client, dt, arenaRadius = null, arenaX = ARENA.x, arenaY =
 
 function mouthPointForDragon(dragon) {
   return {
-    x: dragon.x + Math.cos(dragon.angle) * dragon.radius * 1.18,
-    y: dragon.y + Math.sin(dragon.angle) * dragon.radius * 1.18
+    x: dragon.x + Math.cos(dragon.angle) * dragon.radius * MOUTH_HITBOX_OFFSET,
+    y: dragon.y + Math.sin(dragon.angle) * dragon.radius * MOUTH_HITBOX_OFFSET
+  };
+}
+
+function mouthHitboxSegmentForDragon(dragon) {
+  const center = mouthPointForDragon(dragon);
+  const perpendicularAngle = dragon.angle + Math.PI / 2;
+  const halfLength = dragon.radius * MOUTH_HITBOX_HALF_LENGTH;
+  const px = Math.cos(perpendicularAngle) * halfLength;
+  const py = Math.sin(perpendicularAngle) * halfLength;
+
+  return {
+    center,
+    x1: center.x - px,
+    y1: center.y - py,
+    x2: center.x + px,
+    y2: center.y + py
   };
 }
 
@@ -624,6 +642,62 @@ function distancePointToSegment(px, py, x1, y1, x2, y2) {
   const closestX = x1 + dx * t;
   const closestY = y1 + dy * t;
   return Math.hypot(px - closestX, py - closestY);
+}
+
+function segmentOrientation(ax, ay, bx, by, cx, cy) {
+  const value = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+  if (Math.abs(value) < 0.0001) {
+    return 0;
+  }
+  return value > 0 ? 1 : -1;
+}
+
+function onSegment(ax, ay, bx, by, px, py) {
+  return (
+    px >= Math.min(ax, bx) - 0.0001 &&
+    px <= Math.max(ax, bx) + 0.0001 &&
+    py >= Math.min(ay, by) - 0.0001 &&
+    py <= Math.max(ay, by) + 0.0001
+  );
+}
+
+function segmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
+  const o1 = segmentOrientation(ax, ay, bx, by, cx, cy);
+  const o2 = segmentOrientation(ax, ay, bx, by, dx, dy);
+  const o3 = segmentOrientation(cx, cy, dx, dy, ax, ay);
+  const o4 = segmentOrientation(cx, cy, dx, dy, bx, by);
+
+  if (o1 !== o2 && o3 !== o4) {
+    return true;
+  }
+
+  if (o1 === 0 && onSegment(ax, ay, bx, by, cx, cy)) {
+    return true;
+  }
+  if (o2 === 0 && onSegment(ax, ay, bx, by, dx, dy)) {
+    return true;
+  }
+  if (o3 === 0 && onSegment(cx, cy, dx, dy, ax, ay)) {
+    return true;
+  }
+  if (o4 === 0 && onSegment(cx, cy, dx, dy, bx, by)) {
+    return true;
+  }
+
+  return false;
+}
+
+function distanceSegmentToSegment(ax, ay, bx, by, cx, cy, dx, dy) {
+  if (segmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy)) {
+    return 0;
+  }
+
+  return Math.min(
+    distancePointToSegment(ax, ay, cx, cy, dx, dy),
+    distancePointToSegment(bx, by, cx, cy, dx, dy),
+    distancePointToSegment(cx, cy, ax, ay, bx, by),
+    distancePointToSegment(dx, dy, ax, ay, bx, by)
+  );
 }
 
 function touchesArenaBoundary(dragon, arenaRadius, arenaX, arenaY) {
@@ -667,11 +741,13 @@ function tryBite(attacker, defender, dt) {
     return;
   }
 
-  const mouth = mouthPointForDragon(attacker.dragon);
+  const mouthHitbox = mouthHitboxSegmentForDragon(attacker.dragon);
   const tailHitbox = tailHitboxSegmentForDragon(defender.dragon);
-  const contactDistance = distancePointToSegment(
-    mouth.x,
-    mouth.y,
+  const contactDistance = distanceSegmentToSegment(
+    mouthHitbox.x1,
+    mouthHitbox.y1,
+    mouthHitbox.x2,
+    mouthHitbox.y2,
     tailHitbox.x1,
     tailHitbox.y1,
     tailHitbox.x2,
