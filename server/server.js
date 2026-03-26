@@ -769,6 +769,7 @@ function updateSoloClient(client, dt) {
 
 function serializeDragon(dragon) {
   const tail = tailPointForDragon(dragon);
+  const tailHitbox = tailHitboxSegmentForDragon(dragon);
   return {
     name: dragon.name,
     x: round1(dragon.x),
@@ -788,7 +789,11 @@ function serializeDragon(dragon) {
     boostVisual: round1(dragon.boostVisual),
     healVisual: round1(dragon.healVisual),
     tailX: round1(tail.x),
-    tailY: round1(tail.y)
+    tailY: round1(tail.y),
+    tailHitboxX1: round1(tailHitbox.x1),
+    tailHitboxY1: round1(tailHitbox.y1),
+    tailHitboxX2: round1(tailHitbox.x2),
+    tailHitboxY2: round1(tailHitbox.y2)
   };
 }
 

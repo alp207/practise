@@ -202,6 +202,10 @@ function createDragon(seed = {}) {
     inArena: seed.inArena === true,
     tailX: Number.isFinite(seed.tailX) ? seed.tailX : x,
     tailY: Number.isFinite(seed.tailY) ? seed.tailY : y,
+    tailHitboxX1: Number.isFinite(seed.tailHitboxX1) ? seed.tailHitboxX1 : null,
+    tailHitboxY1: Number.isFinite(seed.tailHitboxY1) ? seed.tailHitboxY1 : null,
+    tailHitboxX2: Number.isFinite(seed.tailHitboxX2) ? seed.tailHitboxX2 : null,
+    tailHitboxY2: Number.isFinite(seed.tailHitboxY2) ? seed.tailHitboxY2 : null,
     ox: x,
     oy: y,
     nx: x,
@@ -397,6 +401,10 @@ function syncRemoteDragon(current, snapshot, defaults = {}) {
   dragon.inArena = mergedSnapshot.inArena === true;
   dragon.tailX = Number.isFinite(mergedSnapshot.tailX) ? mergedSnapshot.tailX : dragon.tailX;
   dragon.tailY = Number.isFinite(mergedSnapshot.tailY) ? mergedSnapshot.tailY : dragon.tailY;
+  dragon.tailHitboxX1 = Number.isFinite(mergedSnapshot.tailHitboxX1) ? mergedSnapshot.tailHitboxX1 : dragon.tailHitboxX1;
+  dragon.tailHitboxY1 = Number.isFinite(mergedSnapshot.tailHitboxY1) ? mergedSnapshot.tailHitboxY1 : dragon.tailHitboxY1;
+  dragon.tailHitboxX2 = Number.isFinite(mergedSnapshot.tailHitboxX2) ? mergedSnapshot.tailHitboxX2 : dragon.tailHitboxX2;
+  dragon.tailHitboxY2 = Number.isFinite(mergedSnapshot.tailHitboxY2) ? mergedSnapshot.tailHitboxY2 : dragon.tailHitboxY2;
   syncDragonStatusBars(dragon, {
     healthChanged: dragon.health < previousHealth - 0.05,
     healed: dragon.health > previousHealth + 0.05,
@@ -1067,6 +1075,59 @@ function drawDragonBars(dragon) {
   }
 }
 
+function drawTailHitbox(dragon) {
+  if (!dragon) {
+    return;
+  }
+
+  const hasSegment = [
+    dragon.tailHitboxX1,
+    dragon.tailHitboxY1,
+    dragon.tailHitboxX2,
+    dragon.tailHitboxY2
+  ].every(Number.isFinite);
+
+  let x1;
+  let y1;
+  let x2;
+  let y2;
+
+  if (hasSegment) {
+    x1 = dragon.tailHitboxX1;
+    y1 = dragon.tailHitboxY1;
+    x2 = dragon.tailHitboxX2;
+    y2 = dragon.tailHitboxY2;
+  } else {
+    const tailX = Number.isFinite(dragon.tailX)
+      ? dragon.tailX
+      : dragon.x - Math.cos(dragon.angle) * dragon.radius * 1.08;
+    const tailY = Number.isFinite(dragon.tailY)
+      ? dragon.tailY
+      : dragon.y - Math.sin(dragon.angle) * dragon.radius * 1.08;
+    const perpendicularAngle = dragon.angle + Math.PI / 2;
+    const halfLength = dragon.radius * 0.28;
+    const dx = Math.cos(perpendicularAngle) * halfLength;
+    const dy = Math.sin(perpendicularAngle) * halfLength;
+
+    x1 = tailX - dx;
+    y1 = tailY - dy;
+    x2 = tailX + dx;
+    y2 = tailY + dy;
+  }
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(210, 64, 255, 0.92)";
+  ctx.lineWidth = 6;
+  ctx.lineCap = "round";
+  ctx.shadowColor = "rgba(210, 64, 255, 0.35)";
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   if (!dragon) {
     return;
@@ -1092,6 +1153,7 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   }
 
   ctx.restore();
+  drawTailHitbox(dragon);
   drawDragonBars(dragon);
 }
 
