@@ -27,13 +27,14 @@ canvas.tabIndex = 0;
 const GRID_SIZE = 30;
 const WORLD_WIDTH = 7200;
 const WORLD_HEIGHT = 5200;
-const ARENA = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, radius: 1120 };
+const ARENA = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, radius: 336 };
 const PLAYER_RADIUS = 46;
 const PLAYER_SPEED = 150;
-const BOOST_MULTIPLIER = 2.3;
-const BOOST_BURST_MS = 140;
+const BOOST_MULTIPLIER = 1.95;
+const BOOST_BURST_MS = 90;
 const BOOST_COOLDOWN_MS = 3000;
-const BOOST_IMPULSE = 240;
+const BOOST_IMPULSE = 120;
+const BOOST_STEP_DISTANCE = 8;
 const BOOST_WATER_COST = 14;
 const POSITION_LERP_SECONDS = 0.175;
 const POINTER_FORCE_RADIUS = 240;
@@ -41,7 +42,7 @@ const NORMAL_FORCE = 560;
 const BOOST_FORCE = 860;
 const NORMAL_FRICTION = 2.25;
 const BOOST_FRICTION = 1.2;
-const TURN_SPEED = 5.5;
+const TURN_SPEED = 4.125;
 const WATER_REGEN_PER_SECOND = 8;
 const WATER_BOOST_DRAIN_PER_SECOND = 16;
 const BITE_RANGE = 122;
@@ -83,8 +84,10 @@ const state = {
     x: ARENA.x,
     y: ARENA.y,
     zoom: 1.38,
-    targetZoom: 1.38
+    targetZoom: 1.38,
+    userZoom: 1
   },
+  arenaRadius: ARENA.radius,
   player: null,
   opponent: null,
   round: {
@@ -260,8 +263,8 @@ function directionTowardTarget(fromX, fromY, toX, toY, fallbackAngle = 0) {
 function activateBoostBurst(dragon, direction, now = performance.now()) {
   dragon.boostActiveUntil = now + BOOST_BURST_MS;
   dragon.boostCooldownUntil = now + BOOST_COOLDOWN_MS;
-  dragon.x += direction.x * 26;
-  dragon.y += direction.y * 26;
+  dragon.x += direction.x * BOOST_STEP_DISTANCE;
+  dragon.y += direction.y * BOOST_STEP_DISTANCE;
   dragon.ox = dragon.x;
   dragon.oy = dragon.y;
   dragon.nx = dragon.x;
@@ -591,7 +594,7 @@ function clampToArena(dragon) {
   const dx = dragon.x - ARENA.x;
   const dy = dragon.y - ARENA.y;
   const distance = Math.hypot(dx, dy) || 1;
-  const limit = ARENA.radius - dragon.radius - 8;
+  const limit = state.arenaRadius - dragon.radius - 8;
 
   if (distance > limit) {
     dragon.x = ARENA.x + (dx / distance) * limit;
@@ -620,6 +623,7 @@ function spawnDragon() {
 
   state.round.bites = 0;
   state.round.opponentBites = 0;
+  state.arenaRadius = ARENA.radius;
 
   state.camera.x = state.player.x;
   state.camera.y = state.player.y;
@@ -663,7 +667,7 @@ function updateLocalDragon(dt) {
   const now = performance.now();
   const wantsBoost = now < dragon.boostActiveUntil && dragon.water > 0.5;
   const maxSpeed = dragon.baseSpeed * (wantsBoost ? BOOST_MULTIPLIER : 1);
-  const thrustScale = Math.pow(clamp(distance / POINTER_FORCE_RADIUS, 0, 1), 2);
+  const thrustScale = Math.min(1, Math.pow(clamp(distance / POINTER_FORCE_RADIUS, 0, 1), 2) * 1.15);
   const force = (wantsBoost ? BOOST_FORCE : NORMAL_FORCE) * thrustScale;
   const friction = wantsBoost ? BOOST_FRICTION : NORMAL_FRICTION;
 
@@ -715,9 +719,10 @@ function updateCamera(dt) {
     return;
   }
 
+  const zoomScale = state.camera.userZoom;
   state.camera.x = approach(state.camera.x, state.player.x, 7, dt);
   state.camera.y = approach(state.camera.y, state.player.y, 7, dt);
-  state.camera.targetZoom = state.player.boosting ? 1.08 : 1.14;
+  state.camera.targetZoom = (state.player.boosting ? 1.08 : 1.14) * zoomScale;
   state.camera.zoom = approach(state.camera.zoom, state.camera.targetZoom, 4.4, dt);
 }
 
@@ -779,30 +784,30 @@ function drawArena() {
   const arenaGradient = ctx.createRadialGradient(
     ARENA.x,
     ARENA.y,
-    ARENA.radius * 0.25,
+    state.arenaRadius * 0.25,
     ARENA.x,
     ARENA.y,
-    ARENA.radius
+    state.arenaRadius
   );
   arenaGradient.addColorStop(0, "rgba(98, 183, 75, 0.18)");
   arenaGradient.addColorStop(1, "rgba(29, 87, 20, 0.52)");
 
   ctx.fillStyle = arenaGradient;
   ctx.beginPath();
-  ctx.arc(ARENA.x, ARENA.y, ARENA.radius, 0, Math.PI * 2);
+  ctx.arc(ARENA.x, ARENA.y, state.arenaRadius, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.lineWidth = 10;
-  ctx.strokeStyle = "rgba(223, 255, 198, 0.2)";
+  ctx.strokeStyle = "rgba(255, 161, 103, 0.42)";
   ctx.beginPath();
-  ctx.arc(ARENA.x, ARENA.y, ARENA.radius, 0, Math.PI * 2);
+  ctx.arc(ARENA.x, ARENA.y, state.arenaRadius, 0, Math.PI * 2);
   ctx.stroke();
 
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
   for (const ring of [0.3, 0.56, 0.82]) {
     ctx.beginPath();
-    ctx.arc(ARENA.x, ARENA.y, ARENA.radius * ring, 0, Math.PI * 2);
+    ctx.arc(ARENA.x, ARENA.y, state.arenaRadius * ring, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
@@ -975,8 +980,6 @@ function draw() {
   drawDragon(state.opponent, "#ff9a6b", 0.9);
   drawDragon(state.player, "#65fff0", 1);
   ctx.restore();
-
-  drawPointer();
 }
 
 function update(dt) {
@@ -1104,6 +1107,18 @@ function sendPlayerName() {
   }
 }
 
+function sendRespawn() {
+  if (!socketIsOpen()) {
+    return;
+  }
+
+  try {
+    state.network.socket.send(JSON.stringify({ type: "respawn" }));
+  } catch (_error) {
+    // Ignore transient send failures. A reconnect or later retry will resync.
+  }
+}
+
 function sendPing() {
   if (!socketIsOpen()) {
     return;
@@ -1153,6 +1168,7 @@ function setBoost(active) {
     activateBoostBurst(dragon, direction, now);
     clampToArena(dragon);
   }
+  sendPointerPacket();
   sendBooleanPacket(PACKET_BOOST, true);
 }
 
@@ -1181,6 +1197,7 @@ function connectToServer(url, isReconnect = false) {
   state.network.incomingInvite = false;
   state.network.outgoingInvite = false;
   state.network.pingMs = null;
+  state.arenaRadius = ARENA.radius;
   state.network.url = trimmedUrl;
 
   if (!trimmedUrl) {
@@ -1301,6 +1318,12 @@ function applyServerMessage(message) {
     state.network.phase = message.phase;
   }
 
+  if (Number.isFinite(message.arenaRadius)) {
+    state.arenaRadius = message.arenaRadius;
+  } else if (state.network.phase !== "arena") {
+    state.arenaRadius = ARENA.radius;
+  }
+
   state.network.incomingInvite = message.incomingInvite === true;
   state.network.outgoingInvite = message.outgoingInvite === true;
   syncInviteButton();
@@ -1334,6 +1357,11 @@ function applyServerMessage(message) {
   } else if (message.opponent === null) {
     state.opponent = null;
   }
+
+  if (message.dead === true || (state.network.phase === "practice" && state.player && state.player.health <= 0)) {
+    state.phase = "menu";
+    startMenu.classList.remove("hidden");
+  }
 }
 
 function startPractice() {
@@ -1343,6 +1371,17 @@ function startPractice() {
 
   applyPlayerName(nameInput ? nameInput.value : state.profile.name);
   const url = getConfiguredServerUrl();
+
+  if (socketIsOpen() && state.network.connected && state.network.remoteAuthority) {
+    state.phase = "running";
+    state.arenaRadius = ARENA.radius;
+    sendPlayerName();
+    sendRespawn();
+    startMenu.classList.add("hidden");
+    canvas.focus();
+    return;
+  }
+
   connectToServer(url);
   spawnDragon();
   if (url) {
@@ -1401,6 +1440,12 @@ window.addEventListener("mouseup", (event) => {
     setSecondary(false);
   }
 });
+
+canvas.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  const delta = event.deltaY > 0 ? 0.92 : 1.08;
+  state.camera.userZoom = clamp(state.camera.userZoom * delta, 0.78, 1.7);
+}, { passive: false });
 
 window.addEventListener("blur", () => {
   state.pointer.mouseDown = false;
