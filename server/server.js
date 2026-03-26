@@ -13,26 +13,25 @@ const WORLD_HEIGHT = 5200;
 const ARENA = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2, radius: 336 };
 const PLAYER_RADIUS = 46;
 const PLAYER_SPEED = 150;
-const BOOST_MULTIPLIER = 1.95;
-const BOOST_BURST_MS = 90;
+const BOOST_MULTIPLIER = 1.45;
+const BOOST_BURST_MS = 50;
 const BOOST_COOLDOWN_MS = 3000;
-const BOOST_IMPULSE = 120;
-const BOOST_STEP_DISTANCE = 8;
+const BOOST_IMPULSE = 70;
+const BOOST_STEP_DISTANCE = 4;
 const BOOST_WATER_COST = 14;
 const POINTER_FORCE_RADIUS = 240;
 const NORMAL_FORCE = 560;
-const BOOST_FORCE = 860;
-const NORMAL_FRICTION = 2.25;
-const BOOST_FRICTION = 1.2;
+const BOOST_FORCE = 620;
+const NORMAL_FRICTION = 3.1;
+const BOOST_FRICTION = 2.6;
 const TURN_SPEED = 4.125;
-const WATER_REGEN_PER_SECOND = 8;
-const WATER_BOOST_DRAIN_PER_SECOND = 16;
+const WATER_BITE_REWARD = 10;
 const PACKET_POINTER = 0x05;
 const PACKET_RESIZE = 0x11;
 const PACKET_SECONDARY = 0x14;
 const PACKET_BOOST = 0x15;
 const PACKET_INVITE_1V1 = 0x34;
-const BITE_CONTACT_RANGE = 58;
+const BITE_CONTACT_RANGE = 66;
 const BITE_DAMAGE = 10;
 const BITE_COOLDOWN = 0.42;
 const ROOM_MIN_ARENA_RADIUS = 180;
@@ -426,11 +425,6 @@ function updateDragon(client, dt, arenaRadius = ARENA.radius) {
     dragon.angle += shortestAngleDelta(dragon.angle, targetAngle) * Math.min(TURN_SPEED * dt, 1);
   }
 
-  if (wantsBoost && distance > 0.001) {
-    dragon.water = Math.max(0, dragon.water - WATER_BOOST_DRAIN_PER_SECOND * dt);
-  }
-
-  dragon.water = Math.min(dragon.maxWater, dragon.water + WATER_REGEN_PER_SECOND * dt);
   if (!wantsBoost) {
     client.boostActiveUntil = 0;
   }
@@ -512,7 +506,6 @@ function handleSoloDeath(client) {
 
 function tryBite(attacker, defender, dt) {
   if (
-    !attacker.secondary ||
     attacker.biteCooldown > 0 ||
     !attacker.dragon ||
     !defender.dragon ||
@@ -538,6 +531,8 @@ function tryBite(attacker, defender, dt) {
 
   attacker.biteCooldown = BITE_COOLDOWN;
   attacker.roundBites += 1;
+  attacker.dragon.water = Math.min(attacker.dragon.maxWater, attacker.dragon.water + WATER_BITE_REWARD);
+  attacker.dragon.healVisual = 1;
   defender.dragon.health = Math.max(0, defender.dragon.health - BITE_DAMAGE);
   attacker.status = "Tail bite landed.";
   defender.status = "Your tail was bitten.";
