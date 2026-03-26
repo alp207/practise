@@ -41,18 +41,17 @@ const PACKET_RESIZE = 0x11;
 const PACKET_SECONDARY = 0x14;
 const PACKET_BOOST = 0x15;
 const PACKET_INVITE_1V1 = 0x34;
-const BITE_CONTACT_RANGE = 6;
 const BITE_DAMAGE = 10;
 const BITE_COOLDOWN = 2.5;
 const MOUTH_HITBOX_OFFSET = 1.16;
 const MOUTH_HITBOX_HALF_LENGTH = 0.2;
-const TAIL_HITBOX_OFFSET = 1.08;
-const TAIL_HITBOX_HALF_LENGTH = 0.28;
+const FRONT_SAFE_HALF_ANGLE = Math.PI / 3;
+const TAIL_SECTOR_INNER_FACTOR = 0.72;
+const TAIL_SECTOR_OUTER_FACTOR = 1.42;
 const ROOM_MIN_ARENA_RADIUS = 180;
 const ROOM_SHRINK_DELAY_MS = 8000;
 const ROOM_SHRINK_PER_SECOND = 2.2;
 const ARENA_BURN_DAMAGE_PER_SECOND = 3;
-const BITE_MAX_ANGLE_ERROR = 0.22;
 
 const clients = new Map();
 const rooms = new Map();
@@ -606,98 +605,34 @@ function mouthHitboxSegmentForDragon(dragon) {
   };
 }
 
-function tailPointForDragon(dragon) {
+function pointInTailSector(dragon, pointX, pointY) {
+  const dx = pointX - dragon.x;
+  const dy = pointY - dragon.y;
+  const distance = Math.hypot(dx, dy);
+  const minRadius = dragon.radius * TAIL_SECTOR_INNER_FACTOR;
+  const maxRadius = dragon.radius * TAIL_SECTOR_OUTER_FACTOR;
+
+  if (distance < minRadius || distance > maxRadius) {
+    return false;
+  }
+
+  const angleToPoint = Math.atan2(dy, dx);
+  const forwardError = Math.abs(shortestAngleDelta(dragon.angle, angleToPoint));
+  return forwardError >= FRONT_SAFE_HALF_ANGLE;
+}
+
+function tailSectorOuterPointForDragon(dragon) {
   return {
-    x: dragon.x - Math.cos(dragon.angle) * dragon.radius * TAIL_HITBOX_OFFSET,
-    y: dragon.y - Math.sin(dragon.angle) * dragon.radius * TAIL_HITBOX_OFFSET
+    x: dragon.x - Math.cos(dragon.angle) * dragon.radius * TAIL_SECTOR_OUTER_FACTOR,
+    y: dragon.y - Math.sin(dragon.angle) * dragon.radius * TAIL_SECTOR_OUTER_FACTOR
   };
 }
 
-function tailHitboxSegmentForDragon(dragon) {
-  const center = tailPointForDragon(dragon);
-  const perpendicularAngle = dragon.angle + Math.PI / 2;
-  const halfLength = dragon.radius * TAIL_HITBOX_HALF_LENGTH;
-  const px = Math.cos(perpendicularAngle) * halfLength;
-  const py = Math.sin(perpendicularAngle) * halfLength;
-
+function tailSectorInnerPointForDragon(dragon) {
   return {
-    center,
-    x1: center.x - px,
-    y1: center.y - py,
-    x2: center.x + px,
-    y2: center.y + py
+    x: dragon.x - Math.cos(dragon.angle) * dragon.radius * TAIL_SECTOR_INNER_FACTOR,
+    y: dragon.y - Math.sin(dragon.angle) * dragon.radius * TAIL_SECTOR_INNER_FACTOR
   };
-}
-
-function distancePointToSegment(px, py, x1, y1, x2, y2) {
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const lengthSquared = dx * dx + dy * dy;
-
-  if (lengthSquared <= 0.0001) {
-    return Math.hypot(px - x1, py - y1);
-  }
-
-  const t = clamp(((px - x1) * dx + (py - y1) * dy) / lengthSquared, 0, 1);
-  const closestX = x1 + dx * t;
-  const closestY = y1 + dy * t;
-  return Math.hypot(px - closestX, py - closestY);
-}
-
-function segmentOrientation(ax, ay, bx, by, cx, cy) {
-  const value = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-  if (Math.abs(value) < 0.0001) {
-    return 0;
-  }
-  return value > 0 ? 1 : -1;
-}
-
-function onSegment(ax, ay, bx, by, px, py) {
-  return (
-    px >= Math.min(ax, bx) - 0.0001 &&
-    px <= Math.max(ax, bx) + 0.0001 &&
-    py >= Math.min(ay, by) - 0.0001 &&
-    py <= Math.max(ay, by) + 0.0001
-  );
-}
-
-function segmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
-  const o1 = segmentOrientation(ax, ay, bx, by, cx, cy);
-  const o2 = segmentOrientation(ax, ay, bx, by, dx, dy);
-  const o3 = segmentOrientation(cx, cy, dx, dy, ax, ay);
-  const o4 = segmentOrientation(cx, cy, dx, dy, bx, by);
-
-  if (o1 !== o2 && o3 !== o4) {
-    return true;
-  }
-
-  if (o1 === 0 && onSegment(ax, ay, bx, by, cx, cy)) {
-    return true;
-  }
-  if (o2 === 0 && onSegment(ax, ay, bx, by, dx, dy)) {
-    return true;
-  }
-  if (o3 === 0 && onSegment(cx, cy, dx, dy, ax, ay)) {
-    return true;
-  }
-  if (o4 === 0 && onSegment(cx, cy, dx, dy, bx, by)) {
-    return true;
-  }
-
-  return false;
-}
-
-function distanceSegmentToSegment(ax, ay, bx, by, cx, cy, dx, dy) {
-  if (segmentsIntersect(ax, ay, bx, by, cx, cy, dx, dy)) {
-    return 0;
-  }
-
-  return Math.min(
-    distancePointToSegment(ax, ay, cx, cy, dx, dy),
-    distancePointToSegment(bx, by, cx, cy, dx, dy),
-    distancePointToSegment(cx, cy, ax, ay, bx, by),
-    distancePointToSegment(dx, dy, ax, ay, bx, by)
-  );
 }
 
 function touchesArenaBoundary(dragon, arenaRadius, arenaX, arenaY) {
@@ -741,26 +676,9 @@ function tryBite(attacker, defender, dt) {
     return;
   }
 
-  const mouthHitbox = mouthHitboxSegmentForDragon(attacker.dragon);
-  const tailHitbox = tailHitboxSegmentForDragon(defender.dragon);
-  const contactDistance = distanceSegmentToSegment(
-    mouthHitbox.x1,
-    mouthHitbox.y1,
-    mouthHitbox.x2,
-    mouthHitbox.y2,
-    tailHitbox.x1,
-    tailHitbox.y1,
-    tailHitbox.x2,
-    tailHitbox.y2
-  );
-  const visualFacing = attacker.dragon.angle;
-  const targetAngle = Math.atan2(
-    tailHitbox.center.y - attacker.dragon.y,
-    tailHitbox.center.x - attacker.dragon.x
-  );
-  const facingError = Math.abs(shortestAngleDelta(visualFacing, targetAngle));
+  const mouth = mouthPointForDragon(attacker.dragon);
 
-  if (contactDistance > BITE_CONTACT_RANGE || facingError > BITE_MAX_ANGLE_ERROR) {
+  if (!pointInTailSector(defender.dragon, mouth.x, mouth.y)) {
     return;
   }
 
@@ -844,8 +762,8 @@ function updateSoloClient(client, dt) {
 }
 
 function serializeDragon(dragon) {
-  const tail = tailPointForDragon(dragon);
-  const tailHitbox = tailHitboxSegmentForDragon(dragon);
+  const tailOuter = tailSectorOuterPointForDragon(dragon);
+  const tailInner = tailSectorInnerPointForDragon(dragon);
   return {
     name: dragon.name,
     x: round1(dragon.x),
@@ -864,12 +782,10 @@ function serializeDragon(dragon) {
     boosting: dragon.boosting,
     boostVisual: round1(dragon.boostVisual),
     healVisual: round1(dragon.healVisual),
-    tailX: round1(tail.x),
-    tailY: round1(tail.y),
-    tailHitboxX1: round1(tailHitbox.x1),
-    tailHitboxY1: round1(tailHitbox.y1),
-    tailHitboxX2: round1(tailHitbox.x2),
-    tailHitboxY2: round1(tailHitbox.y2)
+    tailX: round1(tailOuter.x),
+    tailY: round1(tailOuter.y),
+    tailInnerX: round1(tailInner.x),
+    tailInnerY: round1(tailInner.y)
   };
 }
 

@@ -56,8 +56,9 @@ const BITE_COOLDOWN_MS = 2500;
 const BITE_COOLDOWN_SECONDS = BITE_COOLDOWN_MS / 1000;
 const MOUTH_HITBOX_OFFSET = 1.16;
 const MOUTH_HITBOX_HALF_LENGTH = 0.2;
-const TAIL_HITBOX_OFFSET = 1.08;
-const TAIL_HITBOX_HALF_LENGTH = 0.28;
+const FRONT_SAFE_HALF_ANGLE = Math.PI / 3;
+const TAIL_SECTOR_INNER_FACTOR = 0.72;
+const TAIL_SECTOR_OUTER_FACTOR = 1.42;
 const HEALTH_BAR_TIMEOUT_MS = 1800;
 const BITE_BAR_TIMEOUT_MS = 500;
 const PING_INTERVAL_MS = 2000;
@@ -1096,12 +1097,6 @@ function mouthHitboxSegmentForDragon(dragon) {
   return segmentFromCenter(centerX, centerY, dragon.angle + Math.PI / 2, dragon.radius * MOUTH_HITBOX_HALF_LENGTH);
 }
 
-function tailHitboxSegmentForDragon(dragon) {
-  const centerX = dragon.x - Math.cos(dragon.angle) * dragon.radius * TAIL_HITBOX_OFFSET;
-  const centerY = dragon.y - Math.sin(dragon.angle) * dragon.radius * TAIL_HITBOX_OFFSET;
-  return segmentFromCenter(centerX, centerY, dragon.angle + Math.PI / 2, dragon.radius * TAIL_HITBOX_HALF_LENGTH);
-}
-
 function drawHitboxSegment(segment, color) {
   ctx.save();
   ctx.strokeStyle = color;
@@ -1116,13 +1111,32 @@ function drawHitboxSegment(segment, color) {
   ctx.restore();
 }
 
+function drawTailSector(dragon) {
+  const outerRadius = dragon.radius * TAIL_SECTOR_OUTER_FACTOR;
+  const innerRadius = dragon.radius * TAIL_SECTOR_INNER_FACTOR;
+  const startAngle = dragon.angle + FRONT_SAFE_HALF_ANGLE;
+  const endAngle = dragon.angle - FRONT_SAFE_HALF_ANGLE;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(210, 64, 255, 0.18)";
+  ctx.strokeStyle = "rgba(210, 64, 255, 0.92)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(dragon.x, dragon.y, outerRadius, startAngle, endAngle, false);
+  ctx.arc(dragon.x, dragon.y, innerRadius, endAngle, startAngle, true);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawDebugHitboxes(dragon) {
   if (!dragon) {
     return;
   }
 
   drawHitboxSegment(mouthHitboxSegmentForDragon(dragon), "rgba(255, 165, 64, 0.92)");
-  drawHitboxSegment(tailHitboxSegmentForDragon(dragon), "rgba(210, 64, 255, 0.92)");
+  drawTailSector(dragon);
 }
 
 function drawDragon(dragon, glowColor, bodyAlpha = 1) {
