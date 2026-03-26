@@ -41,9 +41,11 @@ const PACKET_RESIZE = 0x11;
 const PACKET_SECONDARY = 0x14;
 const PACKET_BOOST = 0x15;
 const PACKET_INVITE_1V1 = 0x34;
-const BITE_CONTACT_RANGE = 22;
+const BITE_CONTACT_RANGE = 16;
 const BITE_DAMAGE = 10;
 const BITE_COOLDOWN = 2.5;
+const TAIL_HITBOX_OFFSET = 1.08;
+const TAIL_HITBOX_HALF_LENGTH = 0.28;
 const ROOM_MIN_ARENA_RADIUS = 180;
 const ROOM_SHRINK_DELAY_MS = 8000;
 const ROOM_SHRINK_PER_SECOND = 2.2;
@@ -526,7 +528,7 @@ function updateDragon(client, dt, arenaRadius = null, arenaX = ARENA.x, arenaY =
   const maxSpeed = dragon.baseSpeed * (wantsBoost ? BOOST_MULTIPLIER : 1);
   const pointerRatio = clamp(effectiveDistance / Math.max(1, POINTER_FORCE_RADIUS - POINTER_DEADZONE), 0, 1);
   const thrustScale = effectiveDistance > 0.001
-    ? Math.min(1, 0.09 + Math.pow(pointerRatio, 1.6) * 1.12)
+    ? Math.min(1, 0.105 + Math.pow(pointerRatio, 1.55) * 1.14)
     : 0;
   const force = (wantsBoost ? BOOST_FORCE : NORMAL_FORCE) * thrustScale;
   const friction = wantsBoost ? BOOST_FRICTION : NORMAL_FRICTION;
@@ -588,9 +590,40 @@ function mouthPointForDragon(dragon) {
 
 function tailPointForDragon(dragon) {
   return {
-    x: dragon.x - Math.cos(dragon.angle) * dragon.radius * 1.45,
-    y: dragon.y - Math.sin(dragon.angle) * dragon.radius * 1.45
+    x: dragon.x - Math.cos(dragon.angle) * dragon.radius * TAIL_HITBOX_OFFSET,
+    y: dragon.y - Math.sin(dragon.angle) * dragon.radius * TAIL_HITBOX_OFFSET
   };
+}
+
+function tailHitboxSegmentForDragon(dragon) {
+  const center = tailPointForDragon(dragon);
+  const perpendicularAngle = dragon.angle + Math.PI / 2;
+  const halfLength = dragon.radius * TAIL_HITBOX_HALF_LENGTH;
+  const px = Math.cos(perpendicularAngle) * halfLength;
+  const py = Math.sin(perpendicularAngle) * halfLength;
+
+  return {
+    center,
+    x1: center.x - px,
+    y1: center.y - py,
+    x2: center.x + px,
+    y2: center.y + py
+  };
+}
+
+function distancePointToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared <= 0.0001) {
+    return Math.hypot(px - x1, py - y1);
+  }
+
+  const t = clamp(((px - x1) * dx + (py - y1) * dy) / lengthSquared, 0, 1);
+  const closestX = x1 + dx * t;
+  const closestY = y1 + dy * t;
+  return Math.hypot(px - closestX, py - closestY);
 }
 
 function touchesArenaBoundary(dragon, arenaRadius, arenaX, arenaY) {
@@ -635,10 +668,20 @@ function tryBite(attacker, defender, dt) {
   }
 
   const mouth = mouthPointForDragon(attacker.dragon);
-  const tail = tailPointForDragon(defender.dragon);
-  const contactDistance = Math.hypot(mouth.x - tail.x, mouth.y - tail.y);
+  const tailHitbox = tailHitboxSegmentForDragon(defender.dragon);
+  const contactDistance = distancePointToSegment(
+    mouth.x,
+    mouth.y,
+    tailHitbox.x1,
+    tailHitbox.y1,
+    tailHitbox.x2,
+    tailHitbox.y2
+  );
   const visualFacing = attacker.dragon.angle;
-  const targetAngle = Math.atan2(tail.y - attacker.dragon.y, tail.x - attacker.dragon.x);
+  const targetAngle = Math.atan2(
+    tailHitbox.center.y - attacker.dragon.y,
+    tailHitbox.center.x - attacker.dragon.x
+  );
   const facingError = Math.abs(shortestAngleDelta(visualFacing, targetAngle));
 
   if (contactDistance > BITE_CONTACT_RANGE || facingError > BITE_MAX_ANGLE_ERROR) {

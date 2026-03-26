@@ -824,7 +824,7 @@ function updateLocalDragon(dt) {
   const maxSpeed = dragon.baseSpeed * (wantsBoost ? BOOST_MULTIPLIER : 1);
   const pointerRatio = clamp(effectiveDistance / Math.max(1, POINTER_FORCE_RADIUS - POINTER_DEADZONE), 0, 1);
   const thrustScale = effectiveDistance > 0.001
-    ? Math.min(1, 0.09 + Math.pow(pointerRatio, 1.6) * 1.12)
+    ? Math.min(1, 0.105 + Math.pow(pointerRatio, 1.55) * 1.14)
     : 0;
   const force = (wantsBoost ? BOOST_FORCE : NORMAL_FORCE) * thrustScale;
   const friction = wantsBoost ? BOOST_FRICTION : NORMAL_FRICTION;
@@ -888,7 +888,7 @@ function updateCamera(dt) {
   const zoomScale = state.camera.userZoom;
   state.camera.x = approach(state.camera.x, state.player.x, 7, dt);
   state.camera.y = approach(state.camera.y, state.player.y, 7, dt);
-  state.camera.targetZoom = (state.player.boosting ? 1.08 : 1.14) * zoomScale;
+  state.camera.targetZoom = 1.14 * zoomScale;
   state.camera.zoom = approach(state.camera.zoom, state.camera.targetZoom, 4.4, dt);
 }
 
@@ -1119,6 +1119,41 @@ function drawInviteTargetMarker() {
   ctx.restore();
 }
 
+function drawArenaBiteCounters() {
+  if (state.network.phase !== "arena" || !state.player || !state.opponent || !state.currentArena) {
+    return;
+  }
+
+  const leftAnchor = worldToScreen(
+    state.currentArena.x - state.currentArena.radius * 0.72,
+    state.currentArena.y - state.currentArena.radius * 0.88
+  );
+  const rightAnchor = worldToScreen(
+    state.currentArena.x + state.currentArena.radius * 0.72,
+    state.currentArena.y - state.currentArena.radius * 0.88
+  );
+
+  ctx.save();
+  ctx.setTransform(state.pixelRatio, 0, 0, state.pixelRatio, 0, 0);
+  ctx.fillStyle = "rgba(241, 255, 251, 0.96)";
+  ctx.textBaseline = "top";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.28)";
+  ctx.shadowBlur = 8;
+
+  ctx.textAlign = "left";
+  ctx.font = "700 22px Segoe UI";
+  ctx.fillText(state.player.name, leftAnchor.x, leftAnchor.y);
+  ctx.font = "600 20px Segoe UI";
+  ctx.fillText(`${state.round.bites} bites`, leftAnchor.x, leftAnchor.y + 34);
+
+  ctx.textAlign = "right";
+  ctx.font = "700 22px Segoe UI";
+  ctx.fillText(state.opponent.name, rightAnchor.x, rightAnchor.y);
+  ctx.font = "600 20px Segoe UI";
+  ctx.fillText(`${state.round.opponentBites} bites`, rightAnchor.x, rightAnchor.y + 34);
+  ctx.restore();
+}
+
 function drawPointer() {
   if (!state.pointer.hasPointer || !state.player) {
     return;
@@ -1163,6 +1198,7 @@ function draw() {
   drawDragon(state.player, "#65fff0", 1);
   drawInviteTargetMarker();
   ctx.restore();
+  drawArenaBiteCounters();
 }
 
 function update(dt) {
