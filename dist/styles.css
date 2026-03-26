@@ -251,6 +251,32 @@ body {
   box-shadow: var(--shadow);
 }
 
+.invite-panel {
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(10, 35, 14, 0.9);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.invite-panel-text {
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.invite-panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .start-menu {
   inset: 0;
   display: grid;

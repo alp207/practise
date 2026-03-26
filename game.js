@@ -19,6 +19,10 @@ const opponentHealthText = document.getElementById("opponentHealthText");
 const roundText = document.getElementById("roundText");
 const bitesText = document.getElementById("bitesText");
 const pingText = document.getElementById("pingText");
+const invitePanel = document.getElementById("invitePanel");
+const invitePanelText = document.getElementById("invitePanelText");
+const acceptInviteButton = document.getElementById("acceptInviteButton");
+const declineInviteButton = document.getElementById("declineInviteButton");
 
 const dragonSprite = new Image();
 dragonSprite.src = "dragon.png";
@@ -87,8 +91,11 @@ const state = {
     userZoom: 1
   },
   arenaRadius: ARENA.radius,
+  currentArena: null,
   player: null,
   opponent: null,
+  others: [],
+  visibleArenas: [],
   round: {
     wins: 0,
     losses: 0,
@@ -107,7 +114,11 @@ const state = {
     outgoingInvite: false,
     pingMs: null,
     lastTargetX: NaN,
-    lastTargetY: NaN
+    lastTargetY: NaN,
+    inviteMode: false,
+    inviteHoverId: null,
+    incomingInviteName: "",
+    outgoingInviteName: ""
   }
 };
 
@@ -155,6 +166,7 @@ function createDragon(seed = {}) {
   const biteCooldownMax = Number.isFinite(seed.biteCooldownMax) ? seed.biteCooldownMax : BITE_COOLDOWN_SECONDS;
 
   return {
+    remoteId: seed.remoteId || null,
     name: seed.name || "Dragon",
     x,
     y,
@@ -184,6 +196,10 @@ function createDragon(seed = {}) {
     bitePerTarget: clamp(biteCooldownMax > 0 ? biteCooldown / biteCooldownMax : 0, 0, 1),
     biteBarTimeoutAt: 0,
     forceHealthBar: false,
+    canInvite: seed.canInvite !== false,
+    inArena: seed.inArena === true,
+    tailX: Number.isFinite(seed.tailX) ? seed.tailX : x,
+    tailY: Number.isFinite(seed.tailY) ? seed.tailY : y,
     ox: x,
     oy: y,
     nx: x,
@@ -361,6 +377,7 @@ function syncRemoteDragon(current, snapshot, defaults = {}) {
 
   dragon.vx = Number.isFinite(mergedSnapshot.vx) ? mergedSnapshot.vx : dragon.vx;
   dragon.vy = Number.isFinite(mergedSnapshot.vy) ? mergedSnapshot.vy : dragon.vy;
+  dragon.remoteId = typeof mergedSnapshot.id === "string" ? mergedSnapshot.id : dragon.remoteId;
   dragon.name = typeof mergedSnapshot.name === "string" ? sanitizeName(mergedSnapshot.name) : dragon.name;
   dragon.health = Number.isFinite(mergedSnapshot.health) ? mergedSnapshot.health : dragon.health;
   dragon.maxHealth = Number.isFinite(mergedSnapshot.maxHealth) ? mergedSnapshot.maxHealth : dragon.maxHealth;
@@ -374,6 +391,10 @@ function syncRemoteDragon(current, snapshot, defaults = {}) {
   dragon.boosting = Boolean(mergedSnapshot.boosting);
   dragon.boostVisual = Number.isFinite(mergedSnapshot.boostVisual) ? mergedSnapshot.boostVisual : dragon.boostVisual;
   dragon.healVisual = Number.isFinite(mergedSnapshot.healVisual) ? mergedSnapshot.healVisual : dragon.healVisual;
+  dragon.canInvite = mergedSnapshot.canInvite !== false;
+  dragon.inArena = mergedSnapshot.inArena === true;
+  dragon.tailX = Number.isFinite(mergedSnapshot.tailX) ? mergedSnapshot.tailX : dragon.tailX;
+  dragon.tailY = Number.isFinite(mergedSnapshot.tailY) ? mergedSnapshot.tailY : dragon.tailY;
   syncDragonStatusBars(dragon, {
     healthChanged: dragon.health < previousHealth - 0.05,
     healed: dragon.health > previousHealth + 0.05,
@@ -381,6 +402,20 @@ function syncRemoteDragon(current, snapshot, defaults = {}) {
   });
 
   return dragon;
+}
+
+function syncDragonCollection(currentList, snapshots = []) {
+  const currentById = new Map();
+
+  for (const dragon of currentList || []) {
+    if (dragon && dragon.remoteId) {
+      currentById.set(dragon.remoteId, dragon);
+    }
+  }
+
+  return snapshots
+    .filter((snapshot) => snapshot && typeof snapshot === "object")
+    .map((snapshot) => syncRemoteDragon(currentById.get(snapshot.id) || null, snapshot));
 }
 
 function setMovedToPos(dragon, x, y) {
@@ -422,22 +457,100 @@ function showConnecting(show) {
   connectingBanner.classList.toggle("hidden", !show);
 }
 
+function syncInvitePanel() {
+  const showIncoming = state.network.incomingInvite && state.network.phase !== "arena";
+  if (invitePanel) {
+    invitePanel.classList.toggle("hidden", !showIncoming);
+  }
+  if (invitePanelText) {
+    invitePanelText.textContent = showIncoming
+      ? `${state.network.incomingInviteName || "Another dragon"} invited you for 1v1.`
+      : "";
+  }
+}
+
+function setInviteMode(active) {
+  const enabled = Boolean(
+    active &&
+    state.network.connected &&
+    state.network.remoteAuthority &&
+    state.network.phase !== "arena" &&
+    !state.network.incomingInvite
+  );
+
+  state.network.inviteMode = enabled;
+  if (!enabled) {
+    state.network.inviteHoverId = null;
+  }
+  syncInviteButton();
+}
+
+function toggleInviteMode() {
+  if (!state.network.connected) {
+    setStatus("Live 1v1 invites need the multiplayer server connection.");
+    return;
+  }
+
+  if (state.network.phase === "arena") {
+    setStatus("Finish the arena before sending a new 1v1 invite.");
+    return;
+  }
+
+  if (state.network.incomingInvite) {
+    setStatus("Use Accept or Decline for the incoming 1v1 request.");
+    return;
+  }
+
+  setInviteMode(!state.network.inviteMode);
+  setStatus(state.network.inviteMode ? "Click a dragon to invite it for 1v1." : "Invite targeting cancelled.");
+}
+
 function syncInviteButton() {
   const inArena = state.network.remoteAuthority && state.network.phase === "arena";
   const incomingInvite = state.network.incomingInvite;
   const outgoingInvite = state.network.outgoingInvite;
   const offline = !state.network.connected;
 
-  inviteButton.disabled = inArena || (outgoingInvite && !incomingInvite);
+  inviteButton.disabled = inArena || offline || outgoingInvite;
   inviteButton.textContent = inArena
     ? "1v1 Live"
     : incomingInvite
-      ? "Accept 1v1"
-      : outgoingInvite
-        ? "Invite Sent"
-        : offline
-          ? "1v1 Offline"
-          : "Invite for 1v1";
+      ? "Invite Waiting"
+      : state.network.inviteMode
+        ? "Cancel Target"
+        : outgoingInvite
+          ? `Invite: ${state.network.outgoingInviteName || "Sent"}`
+          : offline
+            ? "1v1 Offline"
+            : "Invite for 1v1";
+  syncInvitePanel();
+}
+
+function sendInviteTarget(targetId) {
+  if (!socketIsOpen() || !targetId) {
+    return;
+  }
+
+  try {
+    state.network.socket.send(JSON.stringify({
+      type: "invite_player",
+      targetId
+    }));
+  } catch (_error) {
+    // Ignore transient send failures. Reconnect will resync snapshots.
+  }
+}
+
+function sendInviteDecision(type) {
+  if (!socketIsOpen()) {
+    return;
+  }
+
+  try {
+    state.network.socket.send(JSON.stringify({ type }));
+  } catch (_error) {
+    // Ignore transient send failures. Reconnect will resync snapshots.
+  }
 }
 
 function normalizeServerUrl(url) {
@@ -589,29 +702,67 @@ function distanceToZone(entity, zone) {
   return Math.hypot(entity.x - zone.x, entity.y - zone.y);
 }
 
-function clampToArena(dragon) {
-  const dx = dragon.x - ARENA.x;
-  const dy = dragon.y - ARENA.y;
-  const distance = Math.hypot(dx, dy) || 1;
-  const limit = state.arenaRadius - dragon.radius - 8;
-
-  if (distance > limit) {
-    dragon.x = ARENA.x + (dx / distance) * limit;
-    dragon.y = ARENA.y + (dy / distance) * limit;
-    dragon.vx *= 0.28;
-    dragon.vy *= 0.28;
-  }
-
+function clampToWorld(dragon) {
   dragon.x = clamp(dragon.x, dragon.radius, WORLD_WIDTH - dragon.radius);
   dragon.y = clamp(dragon.y, dragon.radius, WORLD_HEIGHT - dragon.radius);
 }
 
+function clampToArena(dragon, arena = state.currentArena) {
+  if (!arena) {
+    clampToWorld(dragon);
+    return;
+  }
+
+  const dx = dragon.x - arena.x;
+  const dy = dragon.y - arena.y;
+  const distance = Math.hypot(dx, dy) || 1;
+  const limit = arena.radius - dragon.radius - 8;
+
+  if (distance > limit) {
+    dragon.x = arena.x + (dx / distance) * limit;
+    dragon.y = arena.y + (dy / distance) * limit;
+    dragon.vx *= 0.28;
+    dragon.vy *= 0.28;
+  }
+
+  clampToWorld(dragon);
+}
+
+function findInviteTargetAt(worldX, worldY) {
+  if (state.network.phase === "arena") {
+    return null;
+  }
+
+  let bestTarget = null;
+  let bestDistance = Infinity;
+
+  for (const dragon of state.others) {
+    if (!dragon || dragon.inArena || dragon.canInvite === false || !dragon.remoteId) {
+      continue;
+    }
+
+    const distance = Math.hypot(worldX - dragon.x, worldY - dragon.y);
+    const targetRadius = dragon.radius * 1.24;
+    if (distance <= targetRadius && distance < bestDistance) {
+      bestTarget = dragon;
+      bestDistance = distance;
+    }
+  }
+
+  return bestTarget;
+}
+
 function spawnDragon() {
   state.player = createDragon({
-    name: state.profile.name
+    name: state.profile.name,
+    x: ARENA.x,
+    y: ARENA.y
   });
   syncDragonStatusBars(state.player, { healed: true });
   state.opponent = null;
+  state.others = [];
+  state.visibleArenas = [];
+  state.currentArena = null;
   state.phase = "running";
   state.network.phase = "practice";
   state.pointer.hasPointer = false;
@@ -619,6 +770,8 @@ function spawnDragon() {
   state.input.secondary = false;
   state.network.lastTargetX = NaN;
   state.network.lastTargetY = NaN;
+  state.network.inviteMode = false;
+  state.network.inviteHoverId = null;
 
   state.round.bites = 0;
   state.round.opponentBites = 0;
@@ -666,7 +819,7 @@ function updateLocalDragon(dt) {
   const now = performance.now();
   const wantsBoost = now < dragon.boostActiveUntil && dragon.water > 0.5;
   const maxSpeed = dragon.baseSpeed * (wantsBoost ? BOOST_MULTIPLIER : 1);
-  const thrustScale = Math.min(1, Math.pow(clamp(distance / POINTER_FORCE_RADIUS, 0, 1), 2) * 1.15);
+  const thrustScale = Math.min(1, Math.pow(clamp(distance / POINTER_FORCE_RADIUS, 0, 1), 2) * 1.3);
   const force = (wantsBoost ? BOOST_FORCE : NORMAL_FORCE) * thrustScale;
   const friction = wantsBoost ? BOOST_FRICTION : NORMAL_FRICTION;
 
@@ -702,7 +855,11 @@ function updateLocalDragon(dt) {
   dragon.boostVisual = approach(dragon.boostVisual, dragon.boosting ? 1 : 0, 10, dt);
   syncDragonStatusBars(dragon);
 
-  clampToArena(dragon);
+  if (state.currentArena) {
+    clampToArena(dragon, state.currentArena);
+  } else {
+    clampToWorld(dragon);
+  }
 }
 
 function updateCamera(dt) {
@@ -774,35 +931,49 @@ function drawGrid() {
   ctx.restore();
 }
 
-function drawArena() {
+function drawArena(arena, label = "") {
+  if (!arena) {
+    return;
+  }
+
   const arenaGradient = ctx.createRadialGradient(
-    ARENA.x,
-    ARENA.y,
-    state.arenaRadius * 0.25,
-    ARENA.x,
-    ARENA.y,
-    state.arenaRadius
+    arena.x,
+    arena.y,
+    arena.radius * 0.25,
+    arena.x,
+    arena.y,
+    arena.radius
   );
   arenaGradient.addColorStop(0, "rgba(98, 183, 75, 0.18)");
   arenaGradient.addColorStop(1, "rgba(29, 87, 20, 0.52)");
 
   ctx.fillStyle = arenaGradient;
   ctx.beginPath();
-  ctx.arc(ARENA.x, ARENA.y, state.arenaRadius, 0, Math.PI * 2);
+  ctx.arc(arena.x, arena.y, arena.radius, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.lineWidth = 10;
   ctx.strokeStyle = "rgba(255, 161, 103, 0.42)";
   ctx.beginPath();
-  ctx.arc(ARENA.x, ARENA.y, state.arenaRadius, 0, Math.PI * 2);
+  ctx.arc(arena.x, arena.y, arena.radius, 0, Math.PI * 2);
   ctx.stroke();
 
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
   for (const ring of [0.3, 0.56, 0.82]) {
     ctx.beginPath();
-    ctx.arc(ARENA.x, ARENA.y, state.arenaRadius * ring, 0, Math.PI * 2);
+    ctx.arc(arena.x, arena.y, arena.radius * ring, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  if (label) {
+    ctx.save();
+    ctx.font = "700 16px Segoe UI";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(241, 255, 251, 0.78)";
+    ctx.fillText(label, arena.x, arena.y - arena.radius - 24);
+    ctx.restore();
   }
 }
 
@@ -940,6 +1111,30 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   drawDragonBars(dragon);
 }
 
+function drawInviteTargetMarker() {
+  if (!state.network.inviteMode) {
+    return;
+  }
+
+  const target = state.others.find((dragon) => dragon.remoteId === state.network.inviteHoverId);
+  if (!target) {
+    return;
+  }
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(255, 248, 112, 0.86)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(target.x, target.y, target.radius + 10, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.font = "700 14px Segoe UI";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(255, 248, 112, 0.96)";
+  ctx.fillText("Invite", target.x, target.y - target.radius - 18);
+  ctx.restore();
+}
+
 function drawPointer() {
   if (!state.pointer.hasPointer || !state.player) {
     return;
@@ -970,9 +1165,19 @@ function draw() {
   beginWorldTransform();
   drawWorld();
   drawGrid();
-  drawArena();
+  if (state.currentArena) {
+    drawArena(state.currentArena);
+  } else {
+    for (const arena of state.visibleArenas) {
+      drawArena(arena, arena.label || "");
+    }
+  }
+  for (const dragon of state.others) {
+    drawDragon(dragon, dragon.inArena ? "#e49f72" : "#9fe7ff", dragon.inArena ? 0.86 : 0.94);
+  }
   drawDragon(state.opponent, "#ff9a6b", 0.9);
   drawDragon(state.player, "#65fff0", 1);
+  drawInviteTargetMarker();
   ctx.restore();
 }
 
@@ -984,6 +1189,9 @@ function update(dt) {
   if (state.network.connected && state.network.remoteAuthority) {
     moveUpdate(state.player, dt);
     moveUpdate(state.opponent, dt);
+    for (const dragon of state.others) {
+      moveUpdate(dragon, dt);
+    }
   }
 
   const showArenaHealthBars = state.network.phase === "arena" && state.opponent != null;
@@ -994,6 +1202,17 @@ function update(dt) {
   if (state.opponent) {
     state.opponent.forceHealthBar = showArenaHealthBars;
     updateDragonStatusVisuals(state.opponent, dt);
+  }
+  for (const dragon of state.others) {
+    dragon.forceHealthBar = false;
+    updateDragonStatusVisuals(dragon, dt);
+  }
+
+  if (state.network.inviteMode && state.pointer.hasPointer) {
+    const inviteTarget = findInviteTargetAt(state.pointer.worldX, state.pointer.worldY);
+    state.network.inviteHoverId = inviteTarget ? inviteTarget.remoteId : null;
+  } else {
+    state.network.inviteHoverId = null;
   }
 
   updateCamera(dt);
@@ -1076,13 +1295,7 @@ function sendInvitePacket() {
     return;
   }
 
-  sendPacket(2, (view) => {
-    view.setUint8(0, PACKET_INVITE_1V1);
-    view.setUint8(1, 0);
-  });
-
-  syncInviteButton();
-  setStatus(state.network.incomingInvite ? "Incoming 1v1 request." : "1v1 request sent.");
+  toggleInviteMode();
 }
 
 function sendPlayerName() {
@@ -1129,6 +1342,26 @@ function sendPing() {
   }
 }
 
+function tryInvitePointerSelection() {
+  if (!state.network.inviteMode) {
+    return false;
+  }
+
+  const target = findInviteTargetAt(state.pointer.worldX, state.pointer.worldY);
+  if (!target) {
+    setStatus("Move the cursor over a dragon, then click to send the 1v1 invite.");
+    return true;
+  }
+
+  setInviteMode(false);
+  state.network.outgoingInvite = true;
+  state.network.outgoingInviteName = target.name;
+  syncInviteButton();
+  setStatus(`1v1 request sent to ${target.name}.`);
+  sendInviteTarget(target.remoteId);
+  return true;
+}
+
 function releaseAllActions() {
   state.input.boost = false;
 
@@ -1160,7 +1393,11 @@ function setBoost(active) {
   state.input.boost = false;
   if (dragon) {
     activateBoostBurst(dragon, direction, now);
-    clampToArena(dragon);
+    if (state.currentArena) {
+      clampToArena(dragon, state.currentArena);
+    } else {
+      clampToWorld(dragon);
+    }
   }
   sendPointerPacket();
   sendBooleanPacket(PACKET_BOOST, true);
@@ -1190,8 +1427,15 @@ function connectToServer(url, isReconnect = false) {
   state.network.phase = "practice";
   state.network.incomingInvite = false;
   state.network.outgoingInvite = false;
+  state.network.incomingInviteName = "";
+  state.network.outgoingInviteName = "";
+  state.network.inviteMode = false;
+  state.network.inviteHoverId = null;
   state.network.pingMs = null;
   state.arenaRadius = ARENA.radius;
+  state.currentArena = null;
+  state.visibleArenas = [];
+  state.others = [];
   state.network.url = trimmedUrl;
 
   if (!trimmedUrl) {
@@ -1236,6 +1480,10 @@ function connectToServer(url, isReconnect = false) {
       state.network.phase = "practice";
       state.network.incomingInvite = false;
       state.network.outgoingInvite = false;
+      state.network.incomingInviteName = "";
+      state.network.outgoingInviteName = "";
+      state.network.inviteMode = false;
+      state.network.inviteHoverId = null;
       state.network.pingMs = null;
       setConnection(trimmedUrl ? "Disconnected" : "Practice only");
       showConnecting(false);
@@ -1256,6 +1504,10 @@ function connectToServer(url, isReconnect = false) {
       state.network.phase = "practice";
       state.network.incomingInvite = false;
       state.network.outgoingInvite = false;
+      state.network.incomingInviteName = "";
+      state.network.outgoingInviteName = "";
+      state.network.inviteMode = false;
+      state.network.inviteHoverId = null;
       state.network.pingMs = null;
       setConnection("Connection error");
       showConnecting(false);
@@ -1283,6 +1535,10 @@ function connectToServer(url, isReconnect = false) {
     state.network.phase = "practice";
     state.network.incomingInvite = false;
     state.network.outgoingInvite = false;
+    state.network.incomingInviteName = "";
+    state.network.outgoingInviteName = "";
+    state.network.inviteMode = false;
+    state.network.inviteHoverId = null;
     state.network.pingMs = null;
     setConnection("Connection error");
     showConnecting(false);
@@ -1312,6 +1568,15 @@ function applyServerMessage(message) {
     state.network.phase = message.phase;
   }
 
+  state.currentArena = message.arena && typeof message.arena === "object"
+    ? {
+        id: message.arena.id || null,
+        x: Number.isFinite(message.arena.x) ? message.arena.x : ARENA.x,
+        y: Number.isFinite(message.arena.y) ? message.arena.y : ARENA.y,
+        radius: Number.isFinite(message.arena.radius) ? message.arena.radius : ARENA.radius
+      }
+    : null;
+
   if (Number.isFinite(message.arenaRadius)) {
     state.arenaRadius = message.arenaRadius;
   } else if (state.network.phase !== "arena") {
@@ -1320,6 +1585,11 @@ function applyServerMessage(message) {
 
   state.network.incomingInvite = message.incomingInvite === true;
   state.network.outgoingInvite = message.outgoingInvite === true;
+  state.network.incomingInviteName = typeof message.incomingInviteName === "string" ? message.incomingInviteName : "";
+  state.network.outgoingInviteName = typeof message.outgoingInviteName === "string" ? message.outgoingInviteName : "";
+  if (state.network.phase === "arena") {
+    setInviteMode(false);
+  }
   syncInviteButton();
 
   if (message.round && typeof message.round === "object") {
@@ -1352,13 +1622,28 @@ function applyServerMessage(message) {
 
   if (message.opponent && typeof message.opponent === "object") {
     state.opponent = syncRemoteDragon(state.opponent, message.opponent, {
-      x: ARENA.x + ARENA.radius * 0.42,
-      y: ARENA.y,
+      x: state.currentArena ? state.currentArena.x + state.currentArena.radius * 0.42 : ARENA.x + ARENA.radius * 0.42,
+      y: state.currentArena ? state.currentArena.y : ARENA.y,
       angle: Math.PI
     });
   } else if (message.opponent === null) {
     state.opponent = null;
   }
+
+  state.others = Array.isArray(message.others)
+    ? syncDragonCollection(state.others, message.others)
+    : [];
+  state.visibleArenas = Array.isArray(message.arenas)
+    ? message.arenas
+      .filter((arena) => arena && typeof arena === "object")
+      .map((arena) => ({
+        id: arena.id || null,
+        x: Number.isFinite(arena.x) ? arena.x : ARENA.x,
+        y: Number.isFinite(arena.y) ? arena.y : ARENA.y,
+        radius: Number.isFinite(arena.radius) ? arena.radius : ARENA.radius,
+        label: [arena.leftName, arena.rightName].filter(Boolean).join(" vs ")
+      }))
+    : [];
 
   if (message.dead === true || (state.network.phase === "practice" && state.player && state.player.health <= 0)) {
     state.phase = "menu";
@@ -1427,6 +1712,9 @@ canvas.addEventListener("mousedown", (event) => {
   state.pointer.mouseDown = true;
 
   if (event.button === 0) {
+    if (tryInvitePointerSelection()) {
+      return;
+    }
     setBoost(true);
   } else if (event.button === 2) {
     setSecondary(true);
@@ -1516,6 +1804,12 @@ if (nameInput) {
 }
 resetButton.addEventListener("click", resetArena);
 inviteButton.addEventListener("click", sendInvitePacket);
+acceptInviteButton.addEventListener("click", () => {
+  sendInviteDecision("accept_invite");
+});
+declineInviteButton.addEventListener("click", () => {
+  sendInviteDecision("decline_invite");
+});
 
 setInterval(sendPointerPacket, 10);
 setInterval(sendPing, PING_INTERVAL_MS);
