@@ -1138,6 +1138,7 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
 
   const size = dragon.radius * DRAGON_DRAW_SCALE;
   const aura = arenaRolePalette(dragon.arenaRole, glowColor);
+  const showTailMarker = shouldDrawTailMarker(dragon);
 
   ctx.save();
   ctx.translate(dragon.x, dragon.y);
@@ -1146,10 +1147,6 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   ctx.globalAlpha = bodyAlpha;
   ctx.shadowColor = aura.glow;
   ctx.shadowBlur = dragon.arenaRole ? 18 : 16;
-
-  if (shouldDrawTailMarker(dragon)) {
-    drawTailMarker(size);
-  }
 
   if (dragonSprite.complete && dragonSprite.naturalWidth > 0) {
     ctx.drawImage(dragonSprite, -size / 2, -size / 2, size, size);
@@ -1161,6 +1158,15 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   }
 
   ctx.restore();
+
+  if (showTailMarker) {
+    ctx.save();
+    ctx.translate(dragon.x, dragon.y);
+    ctx.rotate(dragon.angle);
+    drawTailMarker(size);
+    ctx.restore();
+  }
+
   drawDragonBars(dragon);
 }
 
