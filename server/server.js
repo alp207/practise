@@ -46,8 +46,9 @@ const BITE_COOLDOWN = 2.5;
 const DRAGON_DRAW_SCALE = 2.65;
 const MOUTH_POINT_OFFSET_FACTOR = 1.16;
 const HERE_TAIL_CENTER_OFFSET_FACTOR = DRAGON_DRAW_SCALE / 2.15;
-const HERE_TAIL_HALF_LENGTH_FACTOR = DRAGON_DRAW_SCALE * 0.1;
-const HERE_TAIL_CONTACT_RADIUS_FACTOR = 0.18;
+const HERE_TAIL_LENGTH_FACTOR = DRAGON_DRAW_SCALE * 0.35;
+const HERE_TAIL_WIDTH_FACTOR = DRAGON_DRAW_SCALE * 0.2;
+const HERE_TAIL_CONTACT_RADIUS_FACTOR = 0.08;
 const ROOM_MIN_ARENA_RADIUS = 180;
 const ROOM_SHRINK_DELAY_MS = 8000;
 const ROOM_SHRINK_PER_SECOND = 2.2;
@@ -605,14 +606,12 @@ function mouthPointForDragon(dragon) {
   };
 }
 
-function segmentFromCenter(centerX, centerY, angle, halfLength) {
-  const px = Math.cos(angle) * halfLength;
-  const py = Math.sin(angle) * halfLength;
+function rotateLocalPoint(localX, localY, angle) {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
   return {
-    x1: centerX - px,
-    y1: centerY - py,
-    x2: centerX + px,
-    y2: centerY + py
+    x: localX * cos - localY * sin,
+    y: localX * sin + localY * cos
   };
 }
 
@@ -633,15 +632,55 @@ function distancePointToSegment(pointX, pointY, segment) {
   return Math.hypot(pointX - closestX, pointY - closestY);
 }
 
-function tailHitboxSegmentForDragon(dragon) {
-  const centerX = dragon.x - Math.cos(dragon.angle) * dragon.radius * HERE_TAIL_CENTER_OFFSET_FACTOR;
-  const centerY = dragon.y - Math.sin(dragon.angle) * dragon.radius * HERE_TAIL_CENTER_OFFSET_FACTOR;
-  return segmentFromCenter(
-    centerX,
-    centerY,
-    dragon.angle + Math.PI / 2,
-    dragon.radius * HERE_TAIL_HALF_LENGTH_FACTOR
-  );
+function tailTriangleForDragon(dragon) {
+  const centerOffsetX = -dragon.radius * HERE_TAIL_CENTER_OFFSET_FACTOR;
+  const halfLength = dragon.radius * HERE_TAIL_LENGTH_FACTOR * 0.5;
+  const halfWidth = dragon.radius * HERE_TAIL_WIDTH_FACTOR * 0.5;
+  const localPoints = [
+    { x: centerOffsetX + halfLength, y: 0 },
+    { x: centerOffsetX - halfLength, y: -halfWidth },
+    { x: centerOffsetX - halfLength, y: halfWidth }
+  ];
+
+  return localPoints.map((point) => {
+    const rotated = rotateLocalPoint(point.x, point.y, dragon.angle);
+    return {
+      x: dragon.x + rotated.x,
+      y: dragon.y + rotated.y
+    };
+  });
+}
+
+function pointInTriangle(pointX, pointY, triangle) {
+  const [a, b, c] = triangle;
+  const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+
+  if (Math.abs(denominator) <= 0.000001) {
+    return false;
+  }
+
+  const alpha = ((b.y - c.y) * (pointX - c.x) + (c.x - b.x) * (pointY - c.y)) / denominator;
+  const beta = ((c.y - a.y) * (pointX - c.x) + (a.x - c.x) * (pointY - c.y)) / denominator;
+  const gamma = 1 - alpha - beta;
+  return alpha >= 0 && beta >= 0 && gamma >= 0;
+}
+
+function distancePointToTriangle(pointX, pointY, triangle) {
+  if (pointInTriangle(pointX, pointY, triangle)) {
+    return 0;
+  }
+
+  const edges = [
+    { x1: triangle[0].x, y1: triangle[0].y, x2: triangle[1].x, y2: triangle[1].y },
+    { x1: triangle[1].x, y1: triangle[1].y, x2: triangle[2].x, y2: triangle[2].y },
+    { x1: triangle[2].x, y1: triangle[2].y, x2: triangle[0].x, y2: triangle[0].y }
+  ];
+
+  let closest = Number.POSITIVE_INFINITY;
+  for (const edge of edges) {
+    closest = Math.min(closest, distancePointToSegment(pointX, pointY, edge));
+  }
+  return closest;
 }
 
 function touchesArenaBoundary(dragon, arenaRadius, arenaX, arenaY) {
@@ -686,10 +725,10 @@ function tryBite(attacker, defender, dt) {
   }
 
   const mouth = mouthPointForDragon(attacker.dragon);
-  const tailHitbox = tailHitboxSegmentForDragon(defender.dragon);
-  const contactRadius = Math.max(6, defender.dragon.radius * HERE_TAIL_CONTACT_RADIUS_FACTOR);
+  const tailHitbox = tailTriangleForDragon(defender.dragon);
+  const contactRadius = Math.max(4, defender.dragon.radius * HERE_TAIL_CONTACT_RADIUS_FACTOR);
 
-  if (distancePointToSegment(mouth.x, mouth.y, tailHitbox) > contactRadius) {
+  if (distancePointToTriangle(mouth.x, mouth.y, tailHitbox) > contactRadius) {
     return;
   }
 

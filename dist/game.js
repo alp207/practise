@@ -56,6 +56,10 @@ const BITE_COOLDOWN_SECONDS = BITE_COOLDOWN_MS / 1000;
 const HEALTH_BAR_TIMEOUT_MS = 1800;
 const BITE_BAR_TIMEOUT_MS = 500;
 const PING_INTERVAL_MS = 2000;
+const DRAGON_DRAW_SCALE = 2.65;
+const HERE_TAIL_CENTER_OFFSET_FACTOR = DRAGON_DRAW_SCALE / 2.15;
+const HERE_TAIL_LENGTH_FACTOR = DRAGON_DRAW_SCALE * 0.35;
+const HERE_TAIL_WIDTH_FACTOR = DRAGON_DRAW_SCALE * 0.2;
 const SPRITE_ROTATION = -Math.PI / 2;
 const ARENA_ROLE_COLORS = {
   player1: {
@@ -1105,12 +1109,34 @@ function arenaRolePalette(role, fallbackColor = "#9fe7ff") {
   };
 }
 
+function shouldDrawTailMarker(dragon) {
+  return Boolean(dragon && state.network.phase === "arena" && dragon === state.opponent);
+}
+
+function drawTailMarker(size) {
+  const centerX = -size * (HERE_TAIL_CENTER_OFFSET_FACTOR / DRAGON_DRAW_SCALE);
+  const tailLength = size * (HERE_TAIL_LENGTH_FACTOR / DRAGON_DRAW_SCALE);
+  const tailWidth = size * (HERE_TAIL_WIDTH_FACTOR / DRAGON_DRAW_SCALE);
+
+  ctx.save();
+  ctx.fillStyle = "rgba(255, 219, 90, 0.92)";
+  ctx.shadowColor = "rgba(255, 219, 90, 0.9)";
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.moveTo(centerX + tailLength * 0.5, 0);
+  ctx.lineTo(centerX - tailLength * 0.5, -tailWidth * 0.5);
+  ctx.lineTo(centerX - tailLength * 0.5, tailWidth * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   if (!dragon) {
     return;
   }
 
-  const size = dragon.radius * 2.65;
+  const size = dragon.radius * DRAGON_DRAW_SCALE;
   const aura = arenaRolePalette(dragon.arenaRole, glowColor);
 
   ctx.save();
@@ -1120,6 +1146,10 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   ctx.globalAlpha = bodyAlpha;
   ctx.shadowColor = aura.glow;
   ctx.shadowBlur = dragon.arenaRole ? 18 : 16;
+
+  if (shouldDrawTailMarker(dragon)) {
+    drawTailMarker(size);
+  }
 
   if (dragonSprite.complete && dragonSprite.naturalWidth > 0) {
     ctx.drawImage(dragonSprite, -size / 2, -size / 2, size, size);
