@@ -48,7 +48,6 @@ const ROOM_MIN_ARENA_RADIUS = 180;
 const ROOM_SHRINK_DELAY_MS = 8000;
 const ROOM_SHRINK_PER_SECOND = 2.2;
 const ARENA_BURN_DAMAGE_PER_SECOND = 3;
-const CONTACT_ANGLE_OFFSET = -Math.PI / 2;
 const BITE_MAX_ANGLE_ERROR = 0.35;
 
 const clients = new Map();
@@ -561,7 +560,7 @@ function updateDragon(client, dt, arenaRadius = null, arenaX = ARENA.x, arenaY =
   dragon.vx = (dragon.x - previousX) / Math.max(dt, 0.0001);
   dragon.vy = (dragon.y - previousY) / Math.max(dt, 0.0001);
 
-  if (effectiveDistance > 0.001) {
+  if (distance > 0.001) {
     const targetAngle = Math.atan2(direction.y, direction.x);
     dragon.angle += shortestAngleDelta(dragon.angle, targetAngle) * Math.min(TURN_SPEED * dt, 1);
   }
@@ -581,18 +580,16 @@ function updateDragon(client, dt, arenaRadius = null, arenaX = ARENA.x, arenaY =
 }
 
 function mouthPointForDragon(dragon) {
-  const angle = dragon.angle + CONTACT_ANGLE_OFFSET;
   return {
-    x: dragon.x + Math.cos(angle) * dragon.radius * 1.18,
-    y: dragon.y + Math.sin(angle) * dragon.radius * 1.18
+    x: dragon.x + Math.cos(dragon.angle) * dragon.radius * 1.18,
+    y: dragon.y + Math.sin(dragon.angle) * dragon.radius * 1.18
   };
 }
 
 function tailPointForDragon(dragon) {
-  const angle = dragon.angle + CONTACT_ANGLE_OFFSET;
   return {
-    x: dragon.x - Math.cos(angle) * dragon.radius * 1.45,
-    y: dragon.y - Math.sin(angle) * dragon.radius * 1.45
+    x: dragon.x - Math.cos(dragon.angle) * dragon.radius * 1.45,
+    y: dragon.y - Math.sin(dragon.angle) * dragon.radius * 1.45
   };
 }
 
@@ -640,7 +637,7 @@ function tryBite(attacker, defender, dt) {
   const mouth = mouthPointForDragon(attacker.dragon);
   const tail = tailPointForDragon(defender.dragon);
   const contactDistance = Math.hypot(mouth.x - tail.x, mouth.y - tail.y);
-  const visualFacing = attacker.dragon.angle + CONTACT_ANGLE_OFFSET;
+  const visualFacing = attacker.dragon.angle;
   const targetAngle = Math.atan2(tail.y - attacker.dragon.y, tail.x - attacker.dragon.x);
   const facingError = Math.abs(shortestAngleDelta(visualFacing, targetAngle));
 

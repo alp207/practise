@@ -858,7 +858,7 @@ function updateLocalDragon(dt) {
   dragon.vx = (dragon.x - previousX) / Math.max(dt, 0.0001);
   dragon.vy = (dragon.y - previousY) / Math.max(dt, 0.0001);
 
-  if (effectiveDistance > 0.001) {
+  if (distance > 0.001) {
     const targetAngle = Math.atan2(direction.y, direction.x);
     dragon.angle += shortestAngleDelta(dragon.angle, targetAngle) * Math.min(TURN_SPEED * dt, 1);
   }
