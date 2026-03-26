@@ -50,28 +50,20 @@ const TURN_SPEED = 4.125;
 const POINTER_DEADZONE = 22;
 const POINTER_STOP_SPEED = 18;
 const WATER_BITE_REWARD = 10;
-const BITE_RANGE = 122;
 const BITE_DAMAGE = 10;
 const BITE_COOLDOWN_MS = 2500;
 const BITE_COOLDOWN_SECONDS = BITE_COOLDOWN_MS / 1000;
-const MOUTH_HITBOX_OFFSET = 1.16;
-const MOUTH_HITBOX_HALF_LENGTH = 0.2;
-const FRONT_SAFE_HALF_ANGLE = Math.PI / 3;
-const TAIL_SECTOR_INNER_FACTOR = 0.72;
-const TAIL_SECTOR_OUTER_FACTOR = 1.42;
 const HEALTH_BAR_TIMEOUT_MS = 1800;
 const BITE_BAR_TIMEOUT_MS = 500;
 const PING_INTERVAL_MS = 2000;
 const SPRITE_ROTATION = -Math.PI / 2;
 const ARENA_ROLE_COLORS = {
   player1: {
-    solid: "cyan",
-    soft: "rgba(0, 255, 255, 0.22)",
+    glow: "cyan",
     text: "rgba(188, 255, 255, 0.98)"
   },
   player2: {
-    solid: "yellow",
-    soft: "rgba(255, 238, 64, 0.22)",
+    glow: "yellow",
     text: "rgba(255, 247, 178, 0.98)"
   }
 };
@@ -218,12 +210,6 @@ function createDragon(seed = {}) {
     canInvite: seed.canInvite !== false,
     inArena: seed.inArena === true,
     arenaRole: typeof seed.arenaRole === "string" ? seed.arenaRole : null,
-    tailX: Number.isFinite(seed.tailX) ? seed.tailX : x,
-    tailY: Number.isFinite(seed.tailY) ? seed.tailY : y,
-    tailHitboxX1: Number.isFinite(seed.tailHitboxX1) ? seed.tailHitboxX1 : null,
-    tailHitboxY1: Number.isFinite(seed.tailHitboxY1) ? seed.tailHitboxY1 : null,
-    tailHitboxX2: Number.isFinite(seed.tailHitboxX2) ? seed.tailHitboxX2 : null,
-    tailHitboxY2: Number.isFinite(seed.tailHitboxY2) ? seed.tailHitboxY2 : null,
     ox: x,
     oy: y,
     nx: x,
@@ -418,12 +404,6 @@ function syncRemoteDragon(current, snapshot, defaults = {}) {
   dragon.canInvite = mergedSnapshot.canInvite !== false;
   dragon.inArena = mergedSnapshot.inArena === true;
   dragon.arenaRole = typeof mergedSnapshot.arenaRole === "string" ? mergedSnapshot.arenaRole : null;
-  dragon.tailX = Number.isFinite(mergedSnapshot.tailX) ? mergedSnapshot.tailX : dragon.tailX;
-  dragon.tailY = Number.isFinite(mergedSnapshot.tailY) ? mergedSnapshot.tailY : dragon.tailY;
-  dragon.tailHitboxX1 = Number.isFinite(mergedSnapshot.tailHitboxX1) ? mergedSnapshot.tailHitboxX1 : dragon.tailHitboxX1;
-  dragon.tailHitboxY1 = Number.isFinite(mergedSnapshot.tailHitboxY1) ? mergedSnapshot.tailHitboxY1 : dragon.tailHitboxY1;
-  dragon.tailHitboxX2 = Number.isFinite(mergedSnapshot.tailHitboxX2) ? mergedSnapshot.tailHitboxX2 : dragon.tailHitboxX2;
-  dragon.tailHitboxY2 = Number.isFinite(mergedSnapshot.tailHitboxY2) ? mergedSnapshot.tailHitboxY2 : dragon.tailHitboxY2;
   syncDragonStatusBars(dragon, {
     healthChanged: dragon.health < previousHealth - 0.05,
     healed: dragon.health > previousHealth + 0.05,
@@ -1114,75 +1094,15 @@ function drawDragonBars(dragon) {
   }
 }
 
-function segmentFromCenter(centerX, centerY, angle, halfLength) {
-  const dx = Math.cos(angle) * halfLength;
-  const dy = Math.sin(angle) * halfLength;
-  return {
-    x1: centerX - dx,
-    y1: centerY - dy,
-    x2: centerX + dx,
-    y2: centerY + dy
-  };
-}
-
-function mouthHitboxSegmentForDragon(dragon) {
-  const centerX = dragon.x + Math.cos(dragon.angle) * dragon.radius * MOUTH_HITBOX_OFFSET;
-  const centerY = dragon.y + Math.sin(dragon.angle) * dragon.radius * MOUTH_HITBOX_OFFSET;
-  return segmentFromCenter(centerX, centerY, dragon.angle + Math.PI / 2, dragon.radius * MOUTH_HITBOX_HALF_LENGTH);
-}
-
-function drawHitboxSegment(segment, color) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 6;
-  ctx.lineCap = "round";
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 8;
-  ctx.beginPath();
-  ctx.moveTo(segment.x1, segment.y1);
-  ctx.lineTo(segment.x2, segment.y2);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawTailSector(dragon) {
-  const outerRadius = dragon.radius * TAIL_SECTOR_OUTER_FACTOR;
-  const innerRadius = dragon.radius * TAIL_SECTOR_INNER_FACTOR;
-  const startAngle = dragon.angle + FRONT_SAFE_HALF_ANGLE;
-  const endAngle = dragon.angle - FRONT_SAFE_HALF_ANGLE;
-
-  ctx.save();
-  ctx.fillStyle = "rgba(210, 64, 255, 0.18)";
-  ctx.strokeStyle = "rgba(210, 64, 255, 0.92)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(dragon.x, dragon.y, outerRadius, startAngle, endAngle, false);
-  ctx.arc(dragon.x, dragon.y, innerRadius, endAngle, startAngle, true);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-}
-
 function arenaRolePalette(role, fallbackColor = "#9fe7ff") {
   if (role && ARENA_ROLE_COLORS[role]) {
     return ARENA_ROLE_COLORS[role];
   }
 
   return {
-    solid: fallbackColor,
-    soft: fallbackColor,
+    glow: fallbackColor,
     text: "rgba(241, 255, 251, 0.96)"
   };
-}
-
-function drawDebugHitboxes(dragon) {
-  if (!dragon) {
-    return;
-  }
-
-  drawHitboxSegment(mouthHitboxSegmentForDragon(dragon), "rgba(255, 165, 64, 0.92)");
-  drawTailSector(dragon);
 }
 
 function drawDragon(dragon, glowColor, bodyAlpha = 1) {
@@ -1198,8 +1118,8 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   ctx.rotate(dragon.angle + SPRITE_ROTATION);
 
   ctx.globalAlpha = bodyAlpha;
-  ctx.shadowColor = aura.solid;
-  ctx.shadowBlur = dragon.arenaRole ? 20 : 16;
+  ctx.shadowColor = aura.glow;
+  ctx.shadowBlur = dragon.arenaRole ? 18 : 16;
 
   if (dragonSprite.complete && dragonSprite.naturalWidth > 0) {
     ctx.drawImage(dragonSprite, -size / 2, -size / 2, size, size);
@@ -1211,21 +1131,6 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   }
 
   ctx.restore();
-
-  if (dragon.arenaRole) {
-    ctx.save();
-    ctx.strokeStyle = aura.solid;
-    ctx.lineWidth = 4.5;
-    ctx.shadowColor = aura.solid;
-    ctx.shadowBlur = 14;
-    ctx.globalAlpha = bodyAlpha * 0.92;
-    ctx.beginPath();
-    ctx.arc(dragon.x, dragon.y, dragon.radius * 1.04, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  drawDebugHitboxes(dragon);
   drawDragonBars(dragon);
 }
 
