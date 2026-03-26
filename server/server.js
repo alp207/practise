@@ -33,18 +33,23 @@ const BOOST_FORCE = 620;
 const NORMAL_FRICTION = 4.15;
 const BOOST_FRICTION = 3.4;
 const TURN_SPEED = 4.125;
+const POINTER_DEADZONE = 22;
+const POINTER_STOP_SPEED = 18;
 const WATER_BITE_REWARD = 10;
 const PACKET_POINTER = 0x05;
 const PACKET_RESIZE = 0x11;
 const PACKET_SECONDARY = 0x14;
 const PACKET_BOOST = 0x15;
 const PACKET_INVITE_1V1 = 0x34;
-const BITE_CONTACT_RANGE = 28;
+const BITE_CONTACT_RANGE = 22;
 const BITE_DAMAGE = 10;
-const BITE_COOLDOWN = 0.42;
+const BITE_COOLDOWN = 2.5;
 const ROOM_MIN_ARENA_RADIUS = 180;
-const ROOM_SHRINK_PER_SECOND = 4.5;
+const ROOM_SHRINK_DELAY_MS = 8000;
+const ROOM_SHRINK_PER_SECOND = 2.2;
 const ARENA_BURN_DAMAGE_PER_SECOND = 3;
+const CONTACT_ANGLE_OFFSET = -Math.PI / 2;
+const BITE_MAX_ANGLE_ERROR = 0.35;
 
 const clients = new Map();
 const rooms = new Map();
@@ -317,6 +322,7 @@ function startLiveArena(inviter, target) {
     players: [inviter, target],
     state: "running",
     resetAt: 0,
+    shrinkStartsAt: Date.now() + ROOM_SHRINK_DELAY_MS,
     arenaRadius: ARENA.radius,
     centerX: slot.x,
     centerY: slot.y,
@@ -515,23 +521,33 @@ function updateDragon(client, dt, arenaRadius = null, arenaX = ARENA.x, arenaY =
   const targetY = client.targetY;
   const direction = normalize(targetX - dragon.x, targetY - dragon.y);
   const distance = direction.length;
+  const effectiveDistance = Math.max(0, distance - POINTER_DEADZONE);
   const now = Date.now();
   const wantsBoost = now < client.boostActiveUntil && dragon.water > 0.5;
   const maxSpeed = dragon.baseSpeed * (wantsBoost ? BOOST_MULTIPLIER : 1);
-  const pointerRatio = clamp(distance / POINTER_FORCE_RADIUS, 0, 1);
-  const thrustScale = distance > 0.001
-    ? Math.min(1, 0.065 + Math.pow(pointerRatio, 1.7) * 1.18)
+  const pointerRatio = clamp(effectiveDistance / Math.max(1, POINTER_FORCE_RADIUS - POINTER_DEADZONE), 0, 1);
+  const thrustScale = effectiveDistance > 0.001
+    ? Math.min(1, 0.09 + Math.pow(pointerRatio, 1.6) * 1.12)
     : 0;
   const force = (wantsBoost ? BOOST_FORCE : NORMAL_FORCE) * thrustScale;
   const friction = wantsBoost ? BOOST_FRICTION : NORMAL_FRICTION;
 
-  if (distance > 0.001) {
+  if (effectiveDistance > 0.001) {
     dragon.vx += direction.x * force * dt;
     dragon.vy += direction.y * force * dt;
   }
 
   dragon.vx *= Math.exp(-friction * dt);
   dragon.vy *= Math.exp(-friction * dt);
+
+  if (effectiveDistance <= 0.001) {
+    dragon.vx *= Math.exp(-7.8 * dt);
+    dragon.vy *= Math.exp(-7.8 * dt);
+    if (Math.hypot(dragon.vx, dragon.vy) < POINTER_STOP_SPEED) {
+      dragon.vx = 0;
+      dragon.vy = 0;
+    }
+  }
 
   const speed = Math.hypot(dragon.vx, dragon.vy);
   if (speed > maxSpeed && speed > 0) {
@@ -545,7 +561,7 @@ function updateDragon(client, dt, arenaRadius = null, arenaX = ARENA.x, arenaY =
   dragon.vx = (dragon.x - previousX) / Math.max(dt, 0.0001);
   dragon.vy = (dragon.y - previousY) / Math.max(dt, 0.0001);
 
-  if (distance > 0.001) {
+  if (effectiveDistance > 0.001) {
     const targetAngle = Math.atan2(direction.y, direction.x);
     dragon.angle += shortestAngleDelta(dragon.angle, targetAngle) * Math.min(TURN_SPEED * dt, 1);
   }
@@ -565,16 +581,18 @@ function updateDragon(client, dt, arenaRadius = null, arenaX = ARENA.x, arenaY =
 }
 
 function mouthPointForDragon(dragon) {
+  const angle = dragon.angle + CONTACT_ANGLE_OFFSET;
   return {
-    x: dragon.x + Math.cos(dragon.angle) * dragon.radius * 1.18,
-    y: dragon.y + Math.sin(dragon.angle) * dragon.radius * 1.18
+    x: dragon.x + Math.cos(angle) * dragon.radius * 1.18,
+    y: dragon.y + Math.sin(angle) * dragon.radius * 1.18
   };
 }
 
 function tailPointForDragon(dragon) {
+  const angle = dragon.angle + CONTACT_ANGLE_OFFSET;
   return {
-    x: dragon.x - Math.cos(dragon.angle) * dragon.radius * 1.45,
-    y: dragon.y - Math.sin(dragon.angle) * dragon.radius * 1.45
+    x: dragon.x - Math.cos(angle) * dragon.radius * 1.45,
+    y: dragon.y - Math.sin(angle) * dragon.radius * 1.45
   };
 }
 
@@ -622,8 +640,11 @@ function tryBite(attacker, defender, dt) {
   const mouth = mouthPointForDragon(attacker.dragon);
   const tail = tailPointForDragon(defender.dragon);
   const contactDistance = Math.hypot(mouth.x - tail.x, mouth.y - tail.y);
+  const visualFacing = attacker.dragon.angle + CONTACT_ANGLE_OFFSET;
+  const targetAngle = Math.atan2(tail.y - attacker.dragon.y, tail.x - attacker.dragon.x);
+  const facingError = Math.abs(shortestAngleDelta(visualFacing, targetAngle));
 
-  if (contactDistance > BITE_CONTACT_RANGE) {
+  if (contactDistance > BITE_CONTACT_RANGE || facingError > BITE_MAX_ANGLE_ERROR) {
     return;
   }
 
@@ -654,6 +675,7 @@ function updateRoom(room, dt) {
     if (Date.now() >= room.resetAt) {
       spawnRoom(room);
       room.arenaRadius = ARENA.radius;
+      room.shrinkStartsAt = Date.now() + ROOM_SHRINK_DELAY_MS;
       room.state = "running";
       for (const client of room.players) {
         client.status = "New round started.";
@@ -665,7 +687,9 @@ function updateRoom(room, dt) {
   const [left, right] = room.players;
   left.biteCooldown = Math.max(0, left.biteCooldown - dt);
   right.biteCooldown = Math.max(0, right.biteCooldown - dt);
-  room.arenaRadius = Math.max(ROOM_MIN_ARENA_RADIUS, room.arenaRadius - ROOM_SHRINK_PER_SECOND * dt);
+  if (Date.now() >= room.shrinkStartsAt) {
+    room.arenaRadius = Math.max(ROOM_MIN_ARENA_RADIUS, room.arenaRadius - ROOM_SHRINK_PER_SECOND * dt);
+  }
   updateDragon(left, dt, room.arenaRadius, room.centerX, room.centerY);
   updateDragon(right, dt, room.arenaRadius, room.centerX, room.centerY);
   applyArenaBurn(left, room.arenaRadius, room.centerX, room.centerY, dt);

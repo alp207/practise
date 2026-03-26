@@ -47,10 +47,12 @@ const BOOST_FORCE = 620;
 const NORMAL_FRICTION = 4.15;
 const BOOST_FRICTION = 3.4;
 const TURN_SPEED = 4.125;
+const POINTER_DEADZONE = 22;
+const POINTER_STOP_SPEED = 18;
 const WATER_BITE_REWARD = 10;
 const BITE_RANGE = 122;
 const BITE_DAMAGE = 10;
-const BITE_COOLDOWN_MS = 420;
+const BITE_COOLDOWN_MS = 2500;
 const BITE_COOLDOWN_SECONDS = BITE_COOLDOWN_MS / 1000;
 const HEALTH_BAR_TIMEOUT_MS = 1800;
 const BITE_BAR_TIMEOUT_MS = 500;
@@ -816,23 +818,33 @@ function updateLocalDragon(dt) {
 
   const direction = normalize(targetX - dragon.x, targetY - dragon.y);
   const distance = direction.length;
+  const effectiveDistance = Math.max(0, distance - POINTER_DEADZONE);
   const now = performance.now();
   const wantsBoost = now < dragon.boostActiveUntil && dragon.water > 0.5;
   const maxSpeed = dragon.baseSpeed * (wantsBoost ? BOOST_MULTIPLIER : 1);
-  const pointerRatio = clamp(distance / POINTER_FORCE_RADIUS, 0, 1);
-  const thrustScale = distance > 0.001
-    ? Math.min(1, 0.065 + Math.pow(pointerRatio, 1.7) * 1.18)
+  const pointerRatio = clamp(effectiveDistance / Math.max(1, POINTER_FORCE_RADIUS - POINTER_DEADZONE), 0, 1);
+  const thrustScale = effectiveDistance > 0.001
+    ? Math.min(1, 0.09 + Math.pow(pointerRatio, 1.6) * 1.12)
     : 0;
   const force = (wantsBoost ? BOOST_FORCE : NORMAL_FORCE) * thrustScale;
   const friction = wantsBoost ? BOOST_FRICTION : NORMAL_FRICTION;
 
-  if (distance > 0.001) {
+  if (effectiveDistance > 0.001) {
     dragon.vx += direction.x * force * dt;
     dragon.vy += direction.y * force * dt;
   }
 
   dragon.vx *= Math.exp(-friction * dt);
   dragon.vy *= Math.exp(-friction * dt);
+
+  if (effectiveDistance <= 0.001) {
+    dragon.vx *= Math.exp(-7.8 * dt);
+    dragon.vy *= Math.exp(-7.8 * dt);
+    if (Math.hypot(dragon.vx, dragon.vy) < POINTER_STOP_SPEED) {
+      dragon.vx = 0;
+      dragon.vy = 0;
+    }
+  }
 
   const speed = Math.hypot(dragon.vx, dragon.vy);
   if (speed > maxSpeed && speed > 0) {
@@ -846,7 +858,7 @@ function updateLocalDragon(dt) {
   dragon.vx = (dragon.x - previousX) / Math.max(dt, 0.0001);
   dragon.vy = (dragon.y - previousY) / Math.max(dt, 0.0001);
 
-  if (distance > 0.001) {
+  if (effectiveDistance > 0.001) {
     const targetAngle = Math.atan2(direction.y, direction.x);
     dragon.angle += shortestAngleDelta(dragon.angle, targetAngle) * Math.min(TURN_SPEED * dt, 1);
   }
