@@ -190,6 +190,22 @@ function opponentFor(client) {
   return room.players[0] === client ? room.players[1] : room.players[0];
 }
 
+function arenaRoleForClient(client, room) {
+  if (!client || !room) {
+    return null;
+  }
+
+  if (room.players[0] === client) {
+    return "player1";
+  }
+
+  if (room.players[1] === client) {
+    return "player2";
+  }
+
+  return null;
+}
+
 function previewOpponentFor(client) {
   const preferredId = client.incomingInviteFrom || client.outgoingInviteTo;
   if (preferredId) {
@@ -761,7 +777,7 @@ function updateSoloClient(client, dt) {
   }
 }
 
-function serializeDragon(dragon) {
+function serializeDragon(dragon, options = {}) {
   const tailOuter = tailSectorOuterPointForDragon(dragon);
   const tailInner = tailSectorInnerPointForDragon(dragon);
   return {
@@ -782,6 +798,8 @@ function serializeDragon(dragon) {
     boosting: dragon.boosting,
     boostVisual: round1(dragon.boostVisual),
     healVisual: round1(dragon.healVisual),
+    inArena: options.inArena === true,
+    arenaRole: options.arenaRole || null,
     tailX: round1(tailOuter.x),
     tailY: round1(tailOuter.y),
     tailInnerX: round1(tailInner.x),
@@ -790,12 +808,16 @@ function serializeDragon(dragon) {
 }
 
 function serializeVisibleClient(target) {
+  const room = target.roomId ? rooms.get(target.roomId) : null;
   return {
     id: target.id,
     inArena: Boolean(target.roomId),
     roomId: target.roomId,
     canInvite: !target.roomId && !target.dead,
-    ...serializeDragon(target.dragon)
+    ...serializeDragon(target.dragon, {
+      inArena: Boolean(target.roomId),
+      arenaRole: arenaRoleForClient(target, room)
+    })
   };
 }
 
@@ -807,7 +829,13 @@ function serializeArena(room) {
     radius: round1(room.arenaRadius),
     state: room.state,
     leftName: room.players[0]?.name || "Dragon",
-    rightName: room.players[1]?.name || "Dragon"
+    rightName: room.players[1]?.name || "Dragon",
+    player1Name: room.players[0]?.name || "Player 1",
+    player2Name: room.players[1]?.name || "Player 2",
+    player1Wins: room.players[0]?.wins || 0,
+    player2Wins: room.players[1]?.wins || 0,
+    player1Bites: room.players[0]?.roundBites || 0,
+    player2Bites: room.players[1]?.roundBites || 0
   };
 }
 
@@ -857,21 +885,22 @@ function sendSnapshot(client) {
     phase: room ? "arena" : "practice",
     dead: client.dead === true,
     arenaRadius: room ? room.arenaRadius : ARENA.radius,
-    arena: room
-      ? {
-          id: room.id,
-          x: round1(room.centerX),
-          y: round1(room.centerY),
-          radius: round1(room.arenaRadius)
-        }
-      : null,
+    arena: room ? serializeArena(room) : null,
     arenas: collectVisibleArenasFor(client),
     incomingInvite: client.incomingInviteFrom != null,
     outgoingInvite: client.outgoingInviteTo != null,
     incomingInviteName: incomingInviteClient ? incomingInviteClient.name : null,
     outgoingInviteName: outgoingInviteClient ? outgoingInviteClient.name : null,
-    player: serializeDragon(client.dragon),
-    opponent: roomOpponent && roomOpponent.dragon ? serializeDragon(roomOpponent.dragon) : null,
+    player: serializeDragon(client.dragon, {
+      inArena: Boolean(room),
+      arenaRole: arenaRoleForClient(client, room)
+    }),
+    opponent: roomOpponent && roomOpponent.dragon
+      ? serializeDragon(roomOpponent.dragon, {
+          inArena: Boolean(room),
+          arenaRole: arenaRoleForClient(roomOpponent, room)
+        })
+      : null,
     others: room ? [] : collectVisibleClientsFor(client),
     round: {
       wins: client.wins,

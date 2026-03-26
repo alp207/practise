@@ -63,6 +63,18 @@ const HEALTH_BAR_TIMEOUT_MS = 1800;
 const BITE_BAR_TIMEOUT_MS = 500;
 const PING_INTERVAL_MS = 2000;
 const SPRITE_ROTATION = -Math.PI / 2;
+const ARENA_ROLE_COLORS = {
+  player1: {
+    solid: "cyan",
+    soft: "rgba(0, 255, 255, 0.22)",
+    text: "rgba(188, 255, 255, 0.98)"
+  },
+  player2: {
+    solid: "yellow",
+    soft: "rgba(255, 238, 64, 0.22)",
+    text: "rgba(255, 247, 178, 0.98)"
+  }
+};
 const PACKET_POINTER = 0x05;
 const PACKET_RESIZE = 0x11;
 const PACKET_SECONDARY = 0x14;
@@ -205,6 +217,7 @@ function createDragon(seed = {}) {
     forceHealthBar: false,
     canInvite: seed.canInvite !== false,
     inArena: seed.inArena === true,
+    arenaRole: typeof seed.arenaRole === "string" ? seed.arenaRole : null,
     tailX: Number.isFinite(seed.tailX) ? seed.tailX : x,
     tailY: Number.isFinite(seed.tailY) ? seed.tailY : y,
     tailHitboxX1: Number.isFinite(seed.tailHitboxX1) ? seed.tailHitboxX1 : null,
@@ -404,6 +417,7 @@ function syncRemoteDragon(current, snapshot, defaults = {}) {
   dragon.healVisual = Number.isFinite(mergedSnapshot.healVisual) ? mergedSnapshot.healVisual : dragon.healVisual;
   dragon.canInvite = mergedSnapshot.canInvite !== false;
   dragon.inArena = mergedSnapshot.inArena === true;
+  dragon.arenaRole = typeof mergedSnapshot.arenaRole === "string" ? mergedSnapshot.arenaRole : null;
   dragon.tailX = Number.isFinite(mergedSnapshot.tailX) ? mergedSnapshot.tailX : dragon.tailX;
   dragon.tailY = Number.isFinite(mergedSnapshot.tailY) ? mergedSnapshot.tailY : dragon.tailY;
   dragon.tailHitboxX1 = Number.isFinite(mergedSnapshot.tailHitboxX1) ? mergedSnapshot.tailHitboxX1 : dragon.tailHitboxX1;
@@ -431,6 +445,26 @@ function syncDragonCollection(currentList, snapshots = []) {
   return snapshots
     .filter((snapshot) => snapshot && typeof snapshot === "object")
     .map((snapshot) => syncRemoteDragon(currentById.get(snapshot.id) || null, snapshot));
+}
+
+function normalizeArenaSnapshot(arena) {
+  if (!arena || typeof arena !== "object") {
+    return null;
+  }
+
+  return {
+    id: arena.id || null,
+    x: Number.isFinite(arena.x) ? arena.x : ARENA.x,
+    y: Number.isFinite(arena.y) ? arena.y : ARENA.y,
+    radius: Number.isFinite(arena.radius) ? arena.radius : ARENA.radius,
+    label: [arena.leftName, arena.rightName].filter(Boolean).join(" vs "),
+    player1Name: typeof arena.player1Name === "string" ? sanitizeName(arena.player1Name) : "Player 1",
+    player2Name: typeof arena.player2Name === "string" ? sanitizeName(arena.player2Name) : "Player 2",
+    player1Wins: Number.isFinite(arena.player1Wins) ? arena.player1Wins : 0,
+    player2Wins: Number.isFinite(arena.player2Wins) ? arena.player2Wins : 0,
+    player1Bites: Number.isFinite(arena.player1Bites) ? arena.player1Bites : 0,
+    player2Bites: Number.isFinite(arena.player2Bites) ? arena.player2Bites : 0
+  };
 }
 
 function setMovedToPos(dragon, x, y) {
@@ -1130,6 +1164,18 @@ function drawTailSector(dragon) {
   ctx.restore();
 }
 
+function arenaRolePalette(role, fallbackColor = "#9fe7ff") {
+  if (role && ARENA_ROLE_COLORS[role]) {
+    return ARENA_ROLE_COLORS[role];
+  }
+
+  return {
+    solid: fallbackColor,
+    soft: fallbackColor,
+    text: "rgba(241, 255, 251, 0.96)"
+  };
+}
+
 function drawDebugHitboxes(dragon) {
   if (!dragon) {
     return;
@@ -1145,14 +1191,15 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   }
 
   const size = dragon.radius * 2.65;
+  const aura = arenaRolePalette(dragon.arenaRole, glowColor);
 
   ctx.save();
   ctx.translate(dragon.x, dragon.y);
   ctx.rotate(dragon.angle + SPRITE_ROTATION);
 
   ctx.globalAlpha = bodyAlpha;
-  ctx.shadowColor = glowColor;
-  ctx.shadowBlur = 16;
+  ctx.shadowColor = aura.solid;
+  ctx.shadowBlur = dragon.arenaRole ? 20 : 16;
 
   if (dragonSprite.complete && dragonSprite.naturalWidth > 0) {
     ctx.drawImage(dragonSprite, -size / 2, -size / 2, size, size);
@@ -1164,6 +1211,20 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
   }
 
   ctx.restore();
+
+  if (dragon.arenaRole) {
+    ctx.save();
+    ctx.strokeStyle = aura.solid;
+    ctx.lineWidth = 4.5;
+    ctx.shadowColor = aura.solid;
+    ctx.shadowBlur = 14;
+    ctx.globalAlpha = bodyAlpha * 0.92;
+    ctx.beginPath();
+    ctx.arc(dragon.x, dragon.y, dragon.radius * 1.04, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   drawDebugHitboxes(dragon);
   drawDragonBars(dragon);
 }
@@ -1193,37 +1254,52 @@ function drawInviteTargetMarker() {
 }
 
 function drawArenaBiteCounters() {
-  if (state.network.phase !== "arena" || !state.player || !state.opponent || !state.currentArena) {
+  if (!state.currentArena) {
     return;
   }
 
+  const orbit = state.currentArena.radius / 2.35;
   const leftAnchor = worldToScreen(
-    state.currentArena.x - state.currentArena.radius * 0.72,
-    state.currentArena.y - state.currentArena.radius * 0.88
+    state.currentArena.x + Math.cos(-Math.PI / 4 * 3) * orbit,
+    state.currentArena.y + Math.sin(-Math.PI / 4 * 3) * orbit
   );
   const rightAnchor = worldToScreen(
-    state.currentArena.x + state.currentArena.radius * 0.72,
-    state.currentArena.y - state.currentArena.radius * 0.88
+    state.currentArena.x + Math.cos(-Math.PI / 4) * orbit,
+    state.currentArena.y + Math.sin(-Math.PI / 4) * orbit
   );
+  const player1 = {
+    name: state.currentArena.player1Name || "Player 1",
+    wins: Number.isFinite(state.currentArena.player1Wins) ? state.currentArena.player1Wins : 0,
+    bites: Number.isFinite(state.currentArena.player1Bites) ? state.currentArena.player1Bites : 0,
+    color: arenaRolePalette("player1").text
+  };
+  const player2 = {
+    name: state.currentArena.player2Name || "Player 2",
+    wins: Number.isFinite(state.currentArena.player2Wins) ? state.currentArena.player2Wins : 0,
+    bites: Number.isFinite(state.currentArena.player2Bites) ? state.currentArena.player2Bites : 0,
+    color: arenaRolePalette("player2").text
+  };
 
   ctx.save();
   ctx.setTransform(state.pixelRatio, 0, 0, state.pixelRatio, 0, 0);
-  ctx.fillStyle = "rgba(241, 255, 251, 0.96)";
   ctx.textBaseline = "top";
   ctx.shadowColor = "rgba(0, 0, 0, 0.28)";
   ctx.shadowBlur = 8;
 
-  ctx.textAlign = "left";
-  ctx.font = "700 22px Segoe UI";
-  ctx.fillText(state.player.name, leftAnchor.x, leftAnchor.y);
-  ctx.font = "600 20px Segoe UI";
-  ctx.fillText(`${state.round.bites} bites`, leftAnchor.x, leftAnchor.y + 34);
+  ctx.textAlign = "center";
+  ctx.fillStyle = player1.color;
+  ctx.font = "700 18px Arial";
+  ctx.fillText(player1.name, leftAnchor.x, leftAnchor.y);
+  ctx.font = "600 15px Arial";
+  ctx.fillText(`(${player1.wins} wins)`, leftAnchor.x, leftAnchor.y + 18);
+  ctx.fillText(`Bites: ${player1.bites}`, leftAnchor.x, leftAnchor.y + 34);
 
-  ctx.textAlign = "right";
-  ctx.font = "700 22px Segoe UI";
-  ctx.fillText(state.opponent.name, rightAnchor.x, rightAnchor.y);
-  ctx.font = "600 20px Segoe UI";
-  ctx.fillText(`${state.round.opponentBites} bites`, rightAnchor.x, rightAnchor.y + 34);
+  ctx.fillStyle = player2.color;
+  ctx.font = "700 18px Arial";
+  ctx.fillText(player2.name, rightAnchor.x, rightAnchor.y);
+  ctx.font = "600 15px Arial";
+  ctx.fillText(`(${player2.wins} wins)`, rightAnchor.x, rightAnchor.y + 18);
+  ctx.fillText(`Bites: ${player2.bites}`, rightAnchor.x, rightAnchor.y + 34);
   ctx.restore();
 }
 
@@ -1661,14 +1737,7 @@ function applyServerMessage(message) {
     state.network.phase = message.phase;
   }
 
-  state.currentArena = message.arena && typeof message.arena === "object"
-    ? {
-        id: message.arena.id || null,
-        x: Number.isFinite(message.arena.x) ? message.arena.x : ARENA.x,
-        y: Number.isFinite(message.arena.y) ? message.arena.y : ARENA.y,
-        radius: Number.isFinite(message.arena.radius) ? message.arena.radius : ARENA.radius
-      }
-    : null;
+  state.currentArena = normalizeArenaSnapshot(message.arena);
 
   if (Number.isFinite(message.arenaRadius)) {
     state.arenaRadius = message.arenaRadius;
@@ -1729,13 +1798,8 @@ function applyServerMessage(message) {
   state.visibleArenas = Array.isArray(message.arenas)
     ? message.arenas
       .filter((arena) => arena && typeof arena === "object")
-      .map((arena) => ({
-        id: arena.id || null,
-        x: Number.isFinite(arena.x) ? arena.x : ARENA.x,
-        y: Number.isFinite(arena.y) ? arena.y : ARENA.y,
-        radius: Number.isFinite(arena.radius) ? arena.radius : ARENA.radius,
-        label: [arena.leftName, arena.rightName].filter(Boolean).join(" vs ")
-      }))
+      .map((arena) => normalizeArenaSnapshot(arena))
+      .filter(Boolean)
     : [];
 
   if (message.dead === true || (state.network.phase === "practice" && state.player && state.player.health <= 0)) {
