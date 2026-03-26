@@ -28,10 +28,10 @@ const BOOST_IMPULSE = 70;
 const BOOST_STEP_DISTANCE = 4;
 const BOOST_WATER_COST = 14;
 const POINTER_FORCE_RADIUS = 240;
-const NORMAL_FORCE = 560;
+const NORMAL_FORCE = 575;
 const BOOST_FORCE = 620;
-const NORMAL_FRICTION = 3.1;
-const BOOST_FRICTION = 2.6;
+const NORMAL_FRICTION = 4.15;
+const BOOST_FRICTION = 3.4;
 const TURN_SPEED = 4.125;
 const WATER_BITE_REWARD = 10;
 const PACKET_POINTER = 0x05;
@@ -518,7 +518,10 @@ function updateDragon(client, dt, arenaRadius = null, arenaX = ARENA.x, arenaY =
   const now = Date.now();
   const wantsBoost = now < client.boostActiveUntil && dragon.water > 0.5;
   const maxSpeed = dragon.baseSpeed * (wantsBoost ? BOOST_MULTIPLIER : 1);
-  const thrustScale = Math.min(1, Math.pow(clamp(distance / POINTER_FORCE_RADIUS, 0, 1), 2) * 1.3);
+  const pointerRatio = clamp(distance / POINTER_FORCE_RADIUS, 0, 1);
+  const thrustScale = distance > 0.001
+    ? Math.min(1, 0.065 + Math.pow(pointerRatio, 1.7) * 1.18)
+    : 0;
   const force = (wantsBoost ? BOOST_FORCE : NORMAL_FORCE) * thrustScale;
   const friction = wantsBoost ? BOOST_FRICTION : NORMAL_FRICTION;
 

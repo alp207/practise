@@ -42,10 +42,10 @@ const BOOST_STEP_DISTANCE = 4;
 const BOOST_WATER_COST = 14;
 const POSITION_LERP_SECONDS = 0.175;
 const POINTER_FORCE_RADIUS = 240;
-const NORMAL_FORCE = 560;
+const NORMAL_FORCE = 575;
 const BOOST_FORCE = 620;
-const NORMAL_FRICTION = 3.1;
-const BOOST_FRICTION = 2.6;
+const NORMAL_FRICTION = 4.15;
+const BOOST_FRICTION = 3.4;
 const TURN_SPEED = 4.125;
 const WATER_BITE_REWARD = 10;
 const BITE_RANGE = 122;
@@ -819,7 +819,10 @@ function updateLocalDragon(dt) {
   const now = performance.now();
   const wantsBoost = now < dragon.boostActiveUntil && dragon.water > 0.5;
   const maxSpeed = dragon.baseSpeed * (wantsBoost ? BOOST_MULTIPLIER : 1);
-  const thrustScale = Math.min(1, Math.pow(clamp(distance / POINTER_FORCE_RADIUS, 0, 1), 2) * 1.3);
+  const pointerRatio = clamp(distance / POINTER_FORCE_RADIUS, 0, 1);
+  const thrustScale = distance > 0.001
+    ? Math.min(1, 0.065 + Math.pow(pointerRatio, 1.7) * 1.18)
+    : 0;
   const force = (wantsBoost ? BOOST_FORCE : NORMAL_FORCE) * thrustScale;
   const friction = wantsBoost ? BOOST_FRICTION : NORMAL_FRICTION;
 
@@ -1057,29 +1060,15 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
     return;
   }
 
-  const size = dragon.radius * 2.65 * (1 + dragon.boostVisual * 0.08);
-  const lunge = dragon.boostVisual * 16;
+  const size = dragon.radius * 2.65;
 
   ctx.save();
-  ctx.translate(
-    dragon.x + Math.cos(dragon.angle) * lunge,
-    dragon.y + Math.sin(dragon.angle) * lunge
-  );
+  ctx.translate(dragon.x, dragon.y);
   ctx.rotate(dragon.angle + SPRITE_ROTATION);
-
-  if (dragon.boostVisual > 0.02) {
-    ctx.globalAlpha = 0.16 + dragon.boostVisual * 0.18;
-    ctx.fillStyle = glowColor;
-    ctx.beginPath();
-    ctx.moveTo(-size * 0.12, size * 0.04);
-    ctx.lineTo(-size * 0.4, size * 0.6);
-    ctx.lineTo(size * 0.14, size * 0.12);
-    ctx.fill();
-  }
 
   ctx.globalAlpha = bodyAlpha;
   ctx.shadowColor = glowColor;
-  ctx.shadowBlur = 24 + dragon.boostVisual * 14;
+  ctx.shadowBlur = 16;
 
   if (dragonSprite.complete && dragonSprite.naturalWidth > 0) {
     ctx.drawImage(dragonSprite, -size / 2, -size / 2, size, size);
@@ -1088,23 +1077,6 @@ function drawDragon(dragon, glowColor, bodyAlpha = 1) {
     ctx.beginPath();
     ctx.arc(0, 0, dragon.radius, 0, Math.PI * 2);
     ctx.fill();
-  }
-
-  if (dragon.hurtVisual > 0.02) {
-    ctx.globalAlpha = dragon.hurtVisual * 0.3;
-    ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
-    ctx.beginPath();
-    ctx.arc(0, 0, Math.max(0, dragon.radius), 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  if (dragon.healVisual > 0.02) {
-    ctx.globalAlpha = dragon.healVisual * 0.45;
-    ctx.strokeStyle = "#a6ffe3";
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.arc(0, 0, dragon.radius + 8 + dragon.healVisual * 10, 0, Math.PI * 2);
-    ctx.stroke();
   }
 
   ctx.restore();
